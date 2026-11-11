@@ -1,5 +1,5 @@
 import { handleShellAtlas } from './integrations/shellatlas.js';
-import { initDatabase, weeklyCleanup, getMetricsHistory, clearHistory } from './database/schema.js';
+import { initDatabase, weeklyCleanup, clearHistory } from './database/schema.js';
 import { checkOfflineNodes, checkExpiringServers, checkResourceAlerts } from './services/notification.js';
 import { updateDatabase } from './database/updateDatabase.js';
 import { handleAdminAPI } from './handlers/admin.js';
@@ -8,10 +8,9 @@ import { handleUpdate, handleWebSocketUpgrade, handleUpdateWebSocketUpgrade } fr
 import { handleServerAPI, handleServersAPI } from './handlers/dashboard.js';
 import { handleTheme } from './handlers/theme.js';
 import { isValidThemeOptions, loadSettings, loadSiteSettings, loadAppearanceOptions, normalizeFrontendWsTimeoutMinutes, normalizeLongHistoryPoints, saveThemeOptions, setDebug, debug } from './utils/settings.js';
-import { omitNullLossProbeFields } from './handlers/dashboard.js';
+import { fetchHistoryData } from './handlers/history.js';
 import { checkAuth, simpleAuthResponse } from './middleware/auth.js';
-import { getServerDetail, getMetricsHistoryCache, setMetricsHistoryCache, getCacheDuration } from './utils/cache.js';
-import { AppError, createSuccessResponse, createUnauthorizedResponse, createBadRequestResponse, createNotFoundResponse, createErrorResponse } from './utils/errors.js';
+import { AppError, createSuccessResponse, createBadRequestResponse, createErrorResponse } from './utils/errors.js';
 import { verifyTurnstileToken } from './utils/common.js';
 import { getCorsAllowedOrigins, createOptionsResponse, applyCors } from './utils/cors.js';
 import { getRemoteVersion } from './utils/version.js';
@@ -102,85 +101,6 @@ async function isTurnstileVerified(request, env, sys) {
   }
 }
 
-async function fetchHistoryData(env, request, id, hours, columns, sys = null) {
-  if (!id) return createBadRequestResponse('Missing ID');
-
-  const ALLOWED_HOURS = [0.167, 0.5, 1, 6, 12, 24, 48, 96, 168];
-  if (!ALLOWED_HOURS.includes(hours)) {
-    return createBadRequestResponse('Invalid hours parameter');
-  }
-  
-  if (!sys) {
-    sys = await loadSiteSettings(env.DB);
-  }
-  const isLoggedIn = await checkAuth(request, env, sys);
-  
-  if (sys.is_public !== 'true' && !isLoggedIn) {
-    return simpleAuthResponse();
-  }
-  
-  if (hours > 24 && !isLoggedIn) {
-    return createUnauthorizedResponse();
-  }
-  
-  const server = await getServerDetail(env.DB, id, isLoggedIn);
-  if (!server) return createNotFoundResponse();
-  
-  // 最多查询7天数据
-  const clampedHours = Math.min(hours, 168);
-  const cacheDuration = getCacheDuration(clampedHours);
-  const longHistoryPoints = clampedHours > 1
-    ? Number(normalizeLongHistoryPoints(sys.long_history_points))
-    : null;
-
-  const cached = getMetricsHistoryCache(id, clampedHours, columns, longHistoryPoints);
-  if (cached && Date.now() - cached.timestamp < cacheDuration) {
-    const cachedData = Array.isArray(cached.data)
-      ? cached.data.map(omitNullLossProbeFields)
-      : cached.data;
-    return createSuccessResponse(cachedData, { 'X-Cache': 'HIT' });
-  }
-  
-  let data;
-  try {
-    data = await getMetricsHistory(
-      env.DB,
-      id,
-      clampedHours,
-      columns,
-      server,
-      longHistoryPoints
-    );
-  } catch (e) {
-    const message = e && e.message ? e.message : String(e);
-    if (/invalid history partition id/i.test(message)) {
-      debug('[History] 服务器未分配历史分区，无法按主键范围查询:', message);
-      return new Response(JSON.stringify({
-        message: 'historyPartitionNotAssigned'
-      }), {
-        status: 409,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    if (/no such column/i.test(message)) {
-      debug('[History] 数据库字段缺失，可能尚未升级数据库:', message);
-      return new Response(JSON.stringify({
-        message: 'databaseUpgradeRequired'
-      }), {
-        status: 409,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    throw e;
-  }
-  
-  const sanitizedData = Array.isArray(data)
-    ? data.map(omitNullLossProbeFields)
-    : data;
-  setMetricsHistoryCache(id, clampedHours, columns, sanitizedData, longHistoryPoints);
-  
-  return createSuccessResponse(sanitizedData, { 'X-Cache': 'MISS' });
-}
 
 export default {
   async fetch(request, env, ctx) {

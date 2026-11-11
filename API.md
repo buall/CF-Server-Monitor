@@ -2238,3 +2238,7 @@ curl -X POST https://status.example.com/admin/api \
 ***
 
 > 文档同步：与源码 `src/index.js`、`src/middleware/auth.js`、`src/handlers/{admin,dashboard,frontend,theme,update}.js`、`src/durable/MetricsBroadcaster.js`、`src/utils/{settings,errors,cors,csp,cache,metrics,common,serverBilling,version,latestReportCache,agentConfig,autoDiscovery}.js`、`src/database/{schema,updateDatabase}.js` 一一对应；后续修改任一文件时，请同步更新本文件。
+
+### ShellAtlas 完整面板服务接口
+
+`GET /integrations/shellatlas/dashboard/embed/` 返回可嵌入的完整主题首页，沿用 Cloudflare Access 服务身份验证，由 ShellAtlas 的管理员专用代理访问。其下仅开放 `api/config`、`api/servers`、`api/server?id=`、`api/history/all?id=&hours=`、`api/ws?subscribe=` 与白名单静态目录；禁止写入和 admin/update 路径。页面跟随后台主题、支持组筛选和只读详情，服务凭据不传给前端。该全局接口与单节点 `/integrations/shellatlas/nodes/{id}/embed/` 权限范围独立。

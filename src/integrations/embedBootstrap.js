@@ -1,6 +1,7 @@
 // Serialized into embed HTML before the untouched theme modules run.
 export function embedBootstrap(context) {
   const base = context.base;
+  const dashboard = context.mode === 'dashboard';
   let card = null;
   const cardInset = context.theme === 'junimo' ? 8 : context.theme === 'generic' ? 12 : 0;
   const nativeFetch = window.fetch.bind(window);
@@ -24,9 +25,18 @@ export function embedBootstrap(context) {
       }
     }
   };
-  window.fetch = (input, init) => nativeFetch(
-    input instanceof Request ? new Request(mapUrl(input.url), input) : mapUrl(input), init
-  );
+  const postDashboard = (type, message) => {
+    if (context.parentOrigin) parent.postMessage({ type: `shellatlas:dashboard-${type}`, ...(message ? { message } : {}) }, context.parentOrigin);
+  };
+  window.fetch = async (input, init) => {
+    const mapped = input instanceof Request ? new Request(mapUrl(input.url), input) : mapUrl(input);
+    const response = await nativeFetch(mapped, init);
+    if (dashboard && new URL(input instanceof Request ? input.url : String(input), location.href).pathname.endsWith('/api/servers')) {
+      if (response.ok) response.clone().json().then(() => requestAnimationFrame(() => requestAnimationFrame(() => postDashboard('ready')))).catch(() => postDashboard('error', '监控面板数据读取失败，请刷新重试。'));
+      else postDashboard('error', '监控面板数据加载失败，请检查主控连接后重试。');
+    }
+    return response;
+  };
   window.WebSocket = class extends NativeWebSocket {
     constructor(url, protocols) {
       const mapped = mapUrl(url);
@@ -36,8 +46,8 @@ export function embedBootstrap(context) {
   };
   // Embed preferences are isolated in this iframe's storage facade. Existing
   // dashboard preferences and administrator credentials are not changed/read.
-  const local = new Map([['monitor_preferred_view', 'bar']]);
-  const session = new Map([
+  const local = new Map(dashboard ? [] : [['monitor_preferred_view', 'bar']]);
+  const session = new Map(dashboard ? [] : [
     ['cfsm-luminaplus:node-view-mode-session:desktop', 'large'],
     ['cfsm-luminaplus:node-view-mode-session:mobile', 'large'],
     ['cfsm-junimo:node-view-mode-session:desktop', 'large'],
@@ -55,6 +65,35 @@ export function embedBootstrap(context) {
     Object.defineProperty(window, 'sessionStorage', { value: storage(session), configurable: true });
   } catch { /* Fail closed rather than using credentials from the parent origin. */
     document.documentElement.dataset.embedFailed = 'true';
+  }
+  if (dashboard) {
+    const adaptAssets = () => document.querySelectorAll('img[src],link[href],script[src]').forEach(mapAsset);
+    const start = () => {
+      if (document.documentElement.dataset.embedFailed) {
+        postDashboard('error', '无法初始化监控面板，请刷新重试。');
+        return;
+      }
+      const observer = new MutationObserver(adaptAssets);
+      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'href'] });
+      addEventListener('pagehide', () => observer.disconnect(), { once: true });
+      adaptAssets();
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start, { once: true });
+    else start();
+    document.addEventListener('click', event => {
+      const anchor = event.target.closest('a[href]');
+      if (!anchor) return;
+      const target = new URL(anchor.getAttribute('href'), location.href);
+      if (target.origin !== location.origin) return;
+      if (/^\/(admin|login)(\/|$)/.test(target.pathname) || /^#\/?(admin|login)(\/|$)/.test(target.hash)) {
+        event.preventDefault();
+        window.open(new URL('/admin', context.siteUrl).toString(), '_blank', 'noopener,noreferrer');
+      } else if (target.pathname === '/' && target.hash) {
+        event.preventDefault();
+        location.hash = target.hash;
+      }
+    }, true);
+    return;
   }
   const findCard = () => {
     const visible = nodes => [...nodes].filter(node => node.getBoundingClientRect().width > 0);

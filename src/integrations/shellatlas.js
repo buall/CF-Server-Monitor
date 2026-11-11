@@ -2,7 +2,9 @@ import { publicMetrics } from './fields.js';
 import { IntegrationError, requireShellAtlasAccess } from './access.js';
 import { embedBootstrap } from './embedBootstrap.js';
 import { serveFrontend } from '../handlers/frontend.js';
-import { buildDashboardResponse } from '../handlers/dashboard.js';
+import { buildDashboardResponse, handleServerAPI } from '../handlers/dashboard.js';
+import { fetchHistoryData } from '../handlers/history.js';
+import { HISTORY_ALL_QUERY_COLUMNS } from '../utils/historyFields.js';
 import { loadSettings } from '../utils/settings.js';
 import { getServerDetail, clearServersListCache } from '../utils/cache.js';
 import { insertServerWithPartition } from '../database/indexOptimization.js';
@@ -17,6 +19,7 @@ const EMBED_THEME_HINTS = new Map([
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const NODE_ROUTE = new RegExp(`^/integrations/shellatlas/nodes/(${UUID})(?:/(.*))?$`, 'i');
 const PROXY_BASE = new RegExp(`^/api/v1/servers/${UUID}/monitor/embed/$`, 'i');
+const DASHBOARD_PROXY_BASE = '/api/v1/monitor/dashboard/embed/';
 
 function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: {
@@ -50,7 +53,7 @@ export function resolveEmbedTheme(settings, env = {}) {
 export function embedContext(request, nodeId) {
   const ownBase = `/integrations/shellatlas/nodes/${nodeId}/embed/`;
   const supplied = request.headers.get('X-ShellAtlas-Embed-Base');
-  if (supplied && !PROXY_BASE.test(supplied)) throw new IntegrationError('Invalid embed base');
+  if (supplied && !PROXY_BASE.test(supplied) && !(nodeId === 'dashboard' && supplied === DASHBOARD_PROXY_BASE)) throw new IntegrationError('Invalid embed base');
   let parentOrigin = '';
   const parent = request.headers.get('X-ShellAtlas-Parent-Origin');
   if (parent) {
@@ -81,14 +84,15 @@ export function rewriteEmbedStyles(css, base) {
     (_, quote, directory) => `url(${quote}${base}${directory}/`);
 }
 
-function scopedConfig(settings) {
+function scopedConfig(settings, dashboard = false) {
   const config = {
     version: CURRENT_VERSION, is_public: true, authorization: false,
     turnstile_enabled: false, turnstile_login_enabled: false,
     site_title: settings.site_title || 'ShellAtlas', default_language: settings.default_language || 'zh',
-    preferred_theme: settings.preferred_theme || 'auto', display_mode: 'bar',
-    theme_options: { showConnections: true, ...settings.theme_options,
+    preferred_theme: settings.preferred_theme || 'auto', display_mode: dashboard ? settings.display_mode || 'bar' : 'bar',
+    theme_options: dashboard ? settings.theme_options || {} : { showConnections: true, ...settings.theme_options,
       desktopNodeViewMode: 'large', mobileNodeViewMode: 'large', hiddenNodes: [] },
+    long_history_points: Number(settings.long_history_points || 120),
     frontend_ws_timeout_minutes: 0, latency_window: { points: 20, hours: 2 }
   };
   for (const name of ['custom_ct_name', 'custom_cu_name', 'custom_cm_name', 'custom_bd_name', 'node_1_name', 'node_2_name', 'node_3_name', 'node_4_name']) {
@@ -103,6 +107,10 @@ export async function handleShellAtlas(request, env, ctx) {
     const url = new URL(request.url);
     if (url.pathname === '/integrations/shellatlas/health' && request.method === 'GET') {
       return json({ ok: true, version: CURRENT_VERSION, integration: 'shellatlas' });
+    }
+    const dashboardPath = '/integrations/shellatlas/dashboard/embed/';
+    if (url.pathname.startsWith(dashboardPath)) {
+      return await handleDashboard(request, env, url.pathname.slice(dashboardPath.length));
     }
     const route = url.pathname.match(NODE_ROUTE);
     if (!route) throw new IntegrationError('Integration route not found', 404);
@@ -201,4 +209,58 @@ export async function handleShellAtlas(request, env, ctx) {
     console.error('[ShellAtlas] Integration request failed:', error.message);
     return json({ error: 'Monitor integration request failed' }, 500);
   }
+}
+
+// The Manager restricts this complete, read-only dashboard to administrators.
+// It has its own route so node-scoped embeds can never select this data scope.
+async function handleDashboard(request, env, suffix) {
+  if (request.method !== 'GET') throw new IntegrationError('Method not allowed', 405);
+  const url = new URL(request.url);
+  const settings = await loadSettings(env.DB);
+  if (suffix === 'api/config') return json(scopedConfig(settings, true));
+  if (suffix === 'api/servers') {
+    markFrontendRealtimeActive();
+    return buildDashboardResponse(env, settings);
+  }
+  if (suffix === 'api/server') return handleServerAPI(request, env, settings, true);
+  if (suffix === 'api/history/all') {
+    return fetchHistoryData(env, request, url.searchParams.get('id'), parseFloat(url.searchParams.get('hours') || '24'), HISTORY_ALL_QUERY_COLUMNS.join(', '), settings, true);
+  }
+  if (suffix === 'api/ws') {
+    if (!env.METRICS_BROADCASTER) throw new IntegrationError('Realtime is unavailable', 503);
+    if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') throw new IntegrationError('WebSocket upgrade required', 426);
+    const stub = env.METRICS_BROADCASTER.get(env.METRICS_BROADCASTER.idFromName('global'));
+    const target = new URL('http://internal/ws');
+    target.searchParams.set('subscribe', url.searchParams.get('subscribe') || 'all');
+    markFrontendRealtimeActive();
+    return stub.fetch(new Request(target, { headers: { Upgrade: 'websocket' } }));
+  }
+  const context = { ...embedContext(request, 'dashboard'), base: request.headers.get('X-ShellAtlas-Embed-Base') || '/integrations/shellatlas/dashboard/embed/', mode: 'dashboard', siteUrl: url.origin };
+  const { themeUrl } = resolveEmbedTheme(settings, env);
+  const embedSettings = { ...settings, theme_url: themeUrl, custom_head: '', custom_script: '' };
+  const embedEnv = { ...env, API_BASE: '' };
+  if (suffix === '') {
+    const response = await serveFrontend(new Request(`${url.origin}/`), embedEnv, embedSettings);
+    if (!response.ok) {
+      const error = new IntegrationError('当前主题发布文件加载失败', 502);
+      error.code = 'CFSM_THEME_LOAD_FAILED';
+      throw error;
+    }
+    const headers = new Headers(response.headers);
+    headers.delete('X-Frame-Options');
+    headers.set('Content-Security-Policy', `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self'${context.parentOrigin ? ` ${context.parentOrigin}` : ''}; object-src 'none'; base-uri 'self'; form-action 'none'`);
+    headers.set('Cache-Control', 'private, no-store');
+    return new Response(renderEmbed(await response.text(), context), { headers });
+  }
+  const asset = suffix.match(/^((?:assets|static|flags|os-icons|files)\/[A-Za-z0-9_./@-]+)$/);
+  if (asset && !asset[1].split('/').some(part => part === '.' || part === '..' || !part)) {
+    const assetRequest = new Request(`${url.origin}/${asset[1]}`);
+    const response = asset[1].startsWith('assets/') ? await serveFrontend(assetRequest, embedEnv, embedSettings) : await env.ASSETS.fetch(assetRequest);
+    if (response.headers.get('Content-Type')?.includes('text/html')) throw new IntegrationError('Asset not found', 404);
+    const headers = new Headers(response.headers);
+    headers.delete('X-CFSM-Theme-Asset');
+    headers.set('Cache-Control', 'private, no-store');
+    return new Response(headers.get('Content-Type')?.includes('text/css') ? rewriteEmbedStyles(await response.text(), context.base) : response.body, { status: response.status, headers });
+  }
+  throw new IntegrationError('Dashboard resource not found', 404);
 }

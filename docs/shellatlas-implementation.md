@@ -129,3 +129,9 @@ GitHub 的 Cloudflare 官方检查 `Workers Builds: cf-server-monitor` 返回 `c
 移除 Junimo/LuminaPlus 仓库白名单；主题仍须使用后台保存的 GitHub 完整发布 SHA。单卡定位改为识别卡片语义类、节点 ID 链接或公开名称，不依赖单一根节点/HTML 标签；支持主题更新数据时替换卡片 DOM，避免被旧路径过滤规则误隐藏。主题资源加载失败返回专门错误码，Manager 区分主题错误与 Access/实时服务错误。
 
 本地浏览器使用真实发布文件验收：Emerald、Pulse、LuminaPlus、Horizon、Junimo、Shadcn、Glassmorphism、Win2000、SAO、AnotherLuminaPlus、hahaha、CRT，均成功定位并渲染单个节点；元数据与静态资源仅使用隔离测试库。
+
+## 完整首页嵌入
+
+新增 `/integrations/shellatlas/dashboard/embed/`，沿用 Access 服务身份校验。此独立入口由 ShellAtlas 管理员面板使用，保留完整主题首页、分组、卡片、只读详情/历史与实时数据，不做单卡 DOM 裁剪。前端存储仍隔离；后台入口在原站点新窗口打开。该路径只处理 GET、数据与静态白名单，不代理 admin、update 或设置修改。原单节点接口不接受此全局范围。
+
+Manager 侧每次请求检查有效管理员会话，并在 WebSocket 存续期间复核角色。详情/历史复用原逻辑，公共接口仍按原认证规则运行；仅经 Access 验证的集成入口使用显式只读服务上下文。

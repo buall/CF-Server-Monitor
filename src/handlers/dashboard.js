@@ -178,8 +178,8 @@ async function getRealtimeStateForServers(env, serverIds) {
   };
 }
 
-export async function handleServerAPI(request, env, sys) {
-  const isLoggedIn = await checkAuth(request, env, sys);
+export async function handleServerAPI(request, env, sys, trustedRead = false) {
+  const isLoggedIn = trustedRead || await checkAuth(request, env, sys);
   
   if (sys.is_public !== 'true' && !isLoggedIn) {
     return simpleAuthResponse();

@@ -72,6 +72,9 @@ test('embed routing cannot reflect arbitrary paths or script origins', () => {
   assert.ok(html.includes(`${base}assets/main.js`));
   assert.ok(!html.includes('https://original.example'));
   assert.deepEqual(publicMetrics({ cpu: 10, note: 'secret', secret: 'key', custom_ct: 'private-host', api_secret: 'key' }), { cpu: 10 });
+  const dashboardBase = '/api/v1/monitor/dashboard/embed/';
+  assert.equal(embedContext(make(dashboardBase), 'dashboard').base, dashboardBase);
+  assert.throws(() => embedContext(make(dashboardBase), a));
 });
 
 test('restricted subscriptions reject escalation, preserve authorization and filter broadcasts', async () => {
@@ -169,6 +172,31 @@ test('authenticated integration provisions idempotently and returns only one D1 
     const missing = await call(`nodes/${a}/embed/`, 'GET', null, embedHeaders);
     assert.equal(missing.status, 502);
     assert.equal((await missing.json()).code, 'CFSM_THEME_LOAD_FAILED');
+    await selectTheme(JUNIMO_THEME);
+    const dashboard = (suffix = '', method = 'GET') => handleShellAtlas(new Request(`https://monitor.example/integrations/shellatlas/dashboard/embed/${suffix}`, {
+      method, headers: {'Cf-Access-Jwt-Assertion': jwt, 'X-ShellAtlas-Embed-Base':'/api/v1/monitor/dashboard/embed/', 'X-ShellAtlas-Parent-Origin':'https://atlas.example'}
+    }), runtime, {});
+    const fullPage = await dashboard();
+    assert.equal(fullPage.status, 200);
+    const fullHtml = await fullPage.text();
+    assert.ok(fullHtml.includes('"mode":"dashboard"'));
+    assert.ok(fullHtml.includes('/api/v1/monitor/dashboard/embed/assets/junimo.js'));
+    assert.ok(!fullHtml.includes('agent-only-secret'));
+    assert.ok(fullPage.headers.get('Content-Security-Policy').includes('frame-ancestors'));
+    const dashboardNodes = await (await dashboard('api/servers')).json();
+    assert.equal(dashboardNodes.servers.length, 1);
+    assert.equal(dashboardNodes.servers[0].id, b);
+    assert.ok(!JSON.stringify(dashboardNodes).includes('private-note'));
+    const fullConfig = await (await dashboard('api/config')).json();
+    assert.equal(fullConfig.authorization, false);
+    assert.ok(!JSON.stringify(fullConfig).includes('agent-only-secret'));
+    const detail = await (await dashboard(`api/server?id=${b}`)).json();
+    assert.equal(detail.id, b);
+    assert.equal((await dashboard('admin/api')).status, 404);
+    assert.equal((await dashboard('api/config', 'POST')).status, 405);
+    assert.equal((await dashboard('api/history/all?id='+b+'&hours=999')).status, 400);
+    assert.equal((await dashboard('api/history/all')).status, 400);
+    assert.equal((await dashboard('api/ws')).status, 503);
   } finally {
     globalThis.fetch = originalFetch;
     clearServersListCache();
