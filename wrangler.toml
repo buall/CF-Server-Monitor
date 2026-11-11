@@ -1,4 +1,4 @@
-# Cloudflare Workers 配置，线上已由deploy.yml接管，这里仅供本地测试
+# Cloudflare Workers 配置：现有 Workers Builds 与本地开发共用绑定声明
 name = "cf-server-monitor"
 main = "src/index.js"
 compatibility_date = "2024-12-01"
@@ -34,5 +34,11 @@ new_sqlite_classes = ["MetricsBroadcaster"]
 
 # 开发服务器配置
 [dev]
-port = 8787
+port = 8788
 local_protocol = "https"
+
+# Public Access application identifiers; service-token secrets stay in ShellAtlas.
+[vars]
+SHELLATLAS_ACCESS_TEAM_DOMAIN = "https://tearth.cloudflareaccess.com"
+SHELLATLAS_ACCESS_AUD = "491a1155ff642ffb49c9fa9b26d1eff6853ebc8d18156b097b41c5f9ce55edd1"
+SHELLATLAS_EMBED_THEME = "luminaplus"

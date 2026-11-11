@@ -215,12 +215,21 @@ export async function handleServersAPI(request, env, sys) {
   }
   markFrontendRealtimeActive();
   
-  const results = (await getAllServers(env.DB, isLoggedIn)).map(withoutPrivateServerFields);
+  return buildDashboardResponse(env, sys, null, isLoggedIn);
+}
+
+// Only called after the integration route verifies Cloudflare service identity.
+export async function buildDashboardResponse(env, sys, serverId = null, includeHidden = false) {
+  const selected = serverId ? await getServerDetail(env.DB, serverId, true) : null;
+  if (serverId && !selected) return createNotFoundResponse('Server not found');
+  const results = (serverId ? [{ ...selected }] : await getAllServers(env.DB, includeHidden)).map(withoutPrivateServerFields);
   const shouldIncludeLatencyHistory = sys.show_three_net_details === 'true';
   
   const serverIds = results.map(server => server.id).filter(Boolean);
   const [latestMetricsMap, realtimeState, latencyHistory] = await Promise.all([
-    getLatestMetricsForAllServers(env.DB),
+    serverId
+      ? getLatestMetrics(env.DB, serverId, selected).then(metrics => new Map([[serverId, metrics]]))
+      : getLatestMetricsForAllServers(env.DB),
     getRealtimeStateForServers(env, serverIds),
     shouldIncludeLatencyHistory
       ? getDashboardLatencyHistory(env.DB, results)

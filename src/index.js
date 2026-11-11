@@ -1,3 +1,4 @@
+import { handleShellAtlas } from './integrations/shellatlas.js';
 import { initDatabase, weeklyCleanup, getMetricsHistory, clearHistory } from './database/schema.js';
 import { checkOfflineNodes, checkExpiringServers, checkResourceAlerts } from './services/notification.js';
 import { updateDatabase } from './database/updateDatabase.js';
@@ -188,6 +189,10 @@ export default {
     const url = new URL(request.url);
     const method = request.method;
     const path = url.pathname;
+
+    if (path === '/integrations/shellatlas' || path.startsWith('/integrations/shellatlas/')) {
+      return handleShellAtlas(request, env, ctx);
+    }
 
     const corsAllowedOrigins = getCorsAllowedOrigins(env);
     

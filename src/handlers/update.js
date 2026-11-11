@@ -844,6 +844,7 @@ async function forwardWebSocketUpgrade(request, env, internalPath, logPrefix) {
     const stub = env.METRICS_BROADCASTER.get(id);
     const realOrigin = new URL(request.url).origin;
     const headers = new Headers(request.headers);
+    headers.delete('X-CFSM-Allowed-Server-Ids');
     headers.set('X-Real-Origin', realOrigin);
     if (request.cf?.country && !headers.get('cf-ipcountry')) {
       headers.set('cf-ipcountry', request.cf.country);

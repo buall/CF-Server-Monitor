@@ -1,0 +1,153 @@
+{
+  "checked_on": "2026-11-11",
+  "monitor_commit": "609cc0b0998793510453be8eadced2064b28ad7d",
+  "upstream_main": "612027cbdb248bc2df7e69f9d01b5cefb4d14fa8",
+  "theme_repository": "volcano-1025/CFSM-Theme-LuminaPlus",
+  "theme_source_commit": "abf1571361a24b2f9b49bba61df86158703fc877",
+  "theme_dist_commit": "7833a6075ea95fa429f9af794b036156579615f8",
+  "theme_files_unmodified": true,
+  "dist_files": [
+    {
+      "path": "assets/Assets-DEl8xFck.js",
+      "git_blob_sha1": "4ce61e57a00d3e0752d3aa81eefed02349a0491a",
+      "sha256": "43dbd94ef40318572598759312049b11d5ad5a31eb7c0d4be8144bd2311be70b"
+    },
+    {
+      "path": "assets/Instance-GS_vmF3d.js",
+      "git_blob_sha1": "f3379179d64b22b1ba30b26009006bbbe116e32c",
+      "sha256": "f65369a30142efc1cbce709e0d405de1e0d217c1d8467397a4f97b090f915d5b"
+    },
+    {
+      "path": "assets/InstancePanel-C7234hRo.js",
+      "git_blob_sha1": "5cddc1b5a6a86894b23723b5c114885ab99ad141",
+      "sha256": "88613f0f900c908cc394e7a93a416695557a41d7972b26df24cc63c656da13b4"
+    },
+    {
+      "path": "assets/MetricColorPicker-BoHKpChq.js",
+      "git_blob_sha1": "7ec6caf185de613ee07b5028eb4ba569da14dfb9",
+      "sha256": "3e0c4b6c4ae048dbc8782b8c9ffb3301c27a6452524a677e7a924dd06291bc44"
+    },
+    {
+      "path": "assets/NotFound-DphpnG2G.js",
+      "git_blob_sha1": "2112d43ca3fedfbe9dc33bcaacac4942f9b93c6f",
+      "sha256": "b8e95256c66c5d07301d0d8efd774eb4499df5026f82f3eeeecc6931fcf14f37"
+    },
+    {
+      "path": "assets/ThemeManage-CTBCpx4B.js",
+      "git_blob_sha1": "830abff7877ef6a20c64444f296dbaa1a9d2ddba",
+      "sha256": "77b37ae89181f5c60172b527b35dca891eff91d9be040d696f9598081a7d2520"
+    },
+    {
+      "path": "assets/charts-16KW4ylY.js",
+      "git_blob_sha1": "daf2f9777aed6a3c6c1fb6050bb22f877b1ba2b3",
+      "sha256": "80b67dab044ed911eaadd28d7a02c4e0d85d40c4f30f3531e21345e7fb8c69d6"
+    },
+    {
+      "path": "assets/charts-CnsZ1jie.css",
+      "git_blob_sha1": "4aaf5729e15eead492da871ec554dcbca95a8dea",
+      "sha256": "0fd9465202f6dfceac29e67c17e5ac9fb1b7ba7615c1bb08782391b791d9f1e0"
+    },
+    {
+      "path": "assets/chevron-down-DxWipON7.js",
+      "git_blob_sha1": "8ff9ad8ac858c5f32803ee0928dd20235f6fff1a",
+      "sha256": "817c885f1d0ffed787b4ef98aff724d1dc59e828ec947ebb1f93b53d9e52cc96"
+    },
+    {
+      "path": "assets/chevron-up-g5x9scID.js",
+      "git_blob_sha1": "a6f7db37db7fcd394b165754f19c405023c0d04e",
+      "sha256": "98a4ed3f708f29081c37446bb23b64e2d88e4c17f3bca8648f12ab8805412f47"
+    },
+    {
+      "path": "assets/i18n-Bw_JTP3h.js",
+      "git_blob_sha1": "7a449ed60f70321526b67c50b32859881106ea1e",
+      "sha256": "2afa32af9d49d7451e08b56773c54e230ed38ab88fe5def1f742388cb6776594"
+    },
+    {
+      "path": "assets/index-C_XdKMNh.css",
+      "git_blob_sha1": "213f876dd6e05c50eb60998240556f35793467d9",
+      "sha256": "11bd249897a4feca2891e1822b7d4d477b76be68715f9194cd3d36dfe87dfd93"
+    },
+    {
+      "path": "assets/index-KUxv_Vx8.js",
+      "git_blob_sha1": "5d5a88be8f5895b3a33bae1827f38176479c5f21",
+      "sha256": "32511d2eb72ed425401e6b6d93fbb72f614c2915dc79582fb57b4e57f7169451"
+    },
+    {
+      "path": "assets/inter-cyrillic-ext-wght-normal-BOeWTOD4.woff2",
+      "git_blob_sha1": "de83a9c7418a1121c8a59bbc7002c69c43cbe76a",
+      "sha256": "ca157063339ac4ad418f214f3abfed119b0798ab4d377386ce5c9e5a7a435ebd"
+    },
+    {
+      "path": "assets/inter-cyrillic-wght-normal-DqGufNeO.woff2",
+      "git_blob_sha1": "d750914763177b95070fba3dc83c3d4466919c01",
+      "sha256": "71d5ee93cc1e9f1d520a3a8b66456de18c7879d8df09d57fcd2eaff75fef0075"
+    },
+    {
+      "path": "assets/inter-greek-ext-wght-normal-DlzME5K_.woff2",
+      "git_blob_sha1": "6e7141f886ce8859ab302717ef13cd06a4810809",
+      "sha256": "6e9e020a25f9b56d418f2c085b1d3c09725a4da23fe693a5b463064606732190"
+    },
+    {
+      "path": "assets/inter-greek-wght-normal-CkhJZR-_.woff2",
+      "git_blob_sha1": "024f0770326a416e2e8da7ea541959bc049c29d1",
+      "sha256": "1be3448e292fbf05ffe176fe1e43f135013d50b1e7d324ad1a558f623d3bb6f6"
+    },
+    {
+      "path": "assets/inter-latin-ext-wght-normal-DO1Apj_S.woff2",
+      "git_blob_sha1": "479d010d2902fa3a5b48e84a973db1978b2e9949",
+      "sha256": "34b9c504cab7a73e37b746343a449132e56cf7b5481af2cb81dc74dcff25c956"
+    },
+    {
+      "path": "assets/inter-latin-wght-normal-Dx4kXJAl.woff2",
+      "git_blob_sha1": "d15208de03cd1ad7c5199f0a0ce915fe841e4722",
+      "sha256": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62"
+    },
+    {
+      "path": "assets/inter-vietnamese-wght-normal-CBcvBZtf.woff2",
+      "git_blob_sha1": "a40c4699cb23a398332b639e0cb2291499943e11",
+      "sha256": "5c66f9e07e90c6d4ac4922cc68d60de26c17b1858e677fb5e603fce3952b3ff2"
+    },
+    {
+      "path": "assets/query-BRYNNX1d.js",
+      "git_blob_sha1": "af96b6977ac99eed292fa59c25b770c499550d26",
+      "sha256": "e43250d6b6edeb584c3c545c9c14dfc2ab3d2608fea4cccd22313d2848fbf6fb"
+    },
+    {
+      "path": "assets/react-DAO37lkK.js",
+      "git_blob_sha1": "4c6c3577293687d186c6a69d17dbfa96ea547558",
+      "sha256": "ca70a4f4c0a2a911174586c209d4e4571d0fec83ed0f0fd45d4554a09a1a7f48"
+    },
+    {
+      "path": "assets/rolldown-runtime-Cyuzqnbw.js",
+      "git_blob_sha1": "18f4f0a2f1b873d7159fe9d36f53446244caf091",
+      "sha256": "6f5330f281c713c1b765ec52977b36599538b8d52c5dd3ce94d211f5b0e7debf"
+    },
+    {
+      "path": "assets/useClock-GY294RVy.js",
+      "git_blob_sha1": "b503a09feb46189a7764c581de0501a4857edaf1",
+      "sha256": "1fd301562ce5332069fe50436fbd738be379c7b7b0173554f8e9919c20464cba"
+    },
+    {
+      "path": "assets/validation-THDfX09h.js",
+      "git_blob_sha1": "1a3f99b255200e8d0ff692bcaeb1c594ad3fc792",
+      "sha256": "2b7f1e27564d45623fff69d5def1a1a730764f3c18d567aadbbdbd5a3b838086"
+    },
+    {
+      "path": "index.html",
+      "git_blob_sha1": "5e6499c0ac999a5cede8fc1c2dfc5a361993c193",
+      "sha256": "fc3ecc36607ec2cd78de621dae4129a3c3aad0098934b99159df63b5411f46c6"
+    }
+  ],
+  "browser_observations": {
+    "homepage_cards": 1,
+    "card_class": "article.server-card",
+    "large_card": true,
+    "detail_chart_page": false,
+    "live_metric_changes_verified": false
+  },
+  "limitations": [
+    "Mock REST fixture and mock WebSocket server; no production authentication, ACL, Access, SSH or D1 verification.",
+    "Source and dist branches were recorded independently; no claim of a reproducible source-to-dist build.",
+    "Screenshot uses fixture data, not actual server metrics."
+  ]
+}

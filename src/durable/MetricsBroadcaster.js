@@ -1,3 +1,4 @@
+import { publicMetrics } from '../integrations/fields.js';
 // Durable Object: 服务器监控指标广播中心
 // 负责维护 WebSocket 连接并在收到新指标时向订阅者实时推送
 //
@@ -1570,6 +1571,19 @@ export class MetricsBroadcaster {
         return new Response('Invalid subscription scope', { status: 400 });
       }
 
+      const allowedHeader = request.headers.get('X-CFSM-Allowed-Server-Ids');
+      let allowedServerIds;
+      if (allowedHeader !== null) {
+        try {
+          const parsed = this._normalizeServerIds(JSON.parse(allowedHeader));
+          if (!parsed.ok || parsed.ids.length !== 1) throw new Error('invalid');
+          allowedServerIds = parsed.ids;
+        } catch { return new Response('Invalid authorization scope', { status: 403 }); }
+        if (scope !== 'all' && !allowedServerIds.includes(scope)) {
+          return new Response('Forbidden subscription', { status: 403 });
+        }
+      }
+
       // @ts-ignore - Cloudflare Workers 运行时提供 WebSocketPair
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
@@ -1578,7 +1592,7 @@ export class MetricsBroadcaster {
       this.state.acceptWebSocket(server);
 
       // 将订阅 scope 和空 serverIds 附加到 WebSocket（休眠后仍保留）
-      server.serializeAttachment({ scope, serverIds: [] });
+      server.serializeAttachment({ scope, serverIds: [], ...(allowedServerIds ? { allowedServerIds } : {}) });
 
       // 立即发送 hello 让客户端确认连接成功
       try {
@@ -2132,8 +2146,12 @@ export class MetricsBroadcaster {
       if (targetScope === 'single' && attachment.scope === 'all') continue;
 
       const scopedUpdates = updates
-        .filter(item => this._shouldDeliver(attachment.scope, item.serverId, attachment.serverIds))
-        .map(maskPublicIpUpdate);
+        .filter(item => (!attachment.allowedServerIds || attachment.allowedServerIds.includes(item.serverId)) &&
+          this._shouldDeliver(attachment.scope, item.serverId, attachment.serverIds))
+        .map(maskPublicIpUpdate)
+        .map(update => attachment.allowedServerIds ? {
+          ...update, samples: update.samples.map(sample => ({ ts: sample.ts ?? sample.timestamp, data: publicMetrics(sample.data || sample.payload || sample.metrics) }))
+        } : update);
       if (scopedUpdates.length === 0) continue;
 
       const message = JSON.stringify({
@@ -2186,7 +2204,14 @@ export class MetricsBroadcaster {
         }
 
         const serverIds = normalizedServerIds.ids;
-        ws.serializeAttachment({ scope, serverIds });
+        if (current.allowedServerIds && (
+          (scope !== 'all' && !current.allowedServerIds.includes(scope)) ||
+          serverIds.some(id => !current.allowedServerIds.includes(id))
+        )) {
+          this._closeInvalidSubscription(ws);
+          return;
+        }
+        ws.serializeAttachment({ ...current, scope, serverIds });
         try {
           ws.send(JSON.stringify({
             type: 'subscribed',

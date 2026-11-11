@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:integration": "npm run build:frontend && wrangler deploy --dry-run --outdir .wrangler/shellatlas-build && node test/dev-shellatlas.mjs",
     "deploy": "npm run build:frontend && wrangler deploy",
     "tail": "wrangler tail",
     "dev:frontend": "vite",
     "build": "node scripts/build.js",
     "build:frontend": "node scripts/build.js",
     "build:github-page": "node scripts/build-github-page.js",
-    "test": "node --test test/auto-discovery.test.js test/admin-usage.test.js test/cron-notification.test.js test/dashboard-latency-window.test.js test/frontend-admin-entry-url.test.js test/frontend-api-base.test.js test/frontend-live-socket.test.js test/latest-metrics-all.test.js test/latest-timestamps.test.js test/metrics-broadcaster-agent-config.test.js test/notification-language.test.js test/traffic-alert.test.js test/server-detail-cache.test.js test/server-insert-sql.test.js test/import-export-settings.test.js test/server-backup-format.test.js test/update-payload-limit.test.js test/update-request-ip.test.js test/user-agent.test.js test/i18n-locales.test.js test/i18n-runtime.test.js",
+    "test": "node --test test/shellatlas.test.js test/auto-discovery.test.js test/admin-usage.test.js test/cron-notification.test.js test/dashboard-latency-window.test.js test/frontend-admin-entry-url.test.js test/frontend-api-base.test.js test/frontend-live-socket.test.js test/latest-metrics-all.test.js test/latest-timestamps.test.js test/metrics-broadcaster-agent-config.test.js test/notification-language.test.js test/traffic-alert.test.js test/server-detail-cache.test.js test/server-insert-sql.test.js test/import-export-settings.test.js test/server-backup-format.test.js test/update-payload-limit.test.js test/update-request-ip.test.js test/user-agent.test.js test/i18n-locales.test.js test/i18n-runtime.test.js",
     "test:all": "npm run test && npm run test:agent-config && npm run test:history-query",
     "test:agent-config": "node test/agent-config.js",
     "test:history-query": "node --test test/history-query.test.js",
@@ -37,6 +38,7 @@
   "dependencies": {
     "chart.js": "^4.4.0",
     "cloudflare-smtp": "^0.1.2",
+    "jose": "^6.2.17",
     "vue": "^3.4.0",
     "vue-router": "^4.4.0"
   },

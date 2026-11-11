@@ -1,0 +1,26 @@
+{
+  "date": "2026-11-11",
+  "production_deployed": false,
+  "production_access_verified": false,
+  "production_agent_installed": false,
+  "worker_runtime": "actual Worker/D1/Durable Object",
+  "access_edge": "isolated fixture with signed RS256 application JWT",
+  "metric_source": "synthetic POST to original /update protocol",
+  "shellatlas_proxy": "actual Manager HTTP/WebSocket routes",
+  "theme": "original LuminaPlus dist 7833a6075ea95fa429f9af794b036156579615f8",
+  "observed_cpu_transition": [
+    2.55,
+    42.55
+  ],
+  "native_websocket_batch_received": true,
+  "unauthenticated_http_status": 401,
+  "admin_proxy_http_status": 404,
+  "revoked_binding_websocket_closed_ms": 15010,
+  "cfsm_tests_passed": 194,
+  "cfsm_history_tests_passed": 6,
+  "cfsm_agent_config_tests_passed": true,
+  "manager_tests_passed": 193,
+  "ssh_install_pipeline_test": "actual SSH transport to test SSH service; installer command not executed",
+  "typescript_passed": true,
+  "web_build_passed": true
+}
