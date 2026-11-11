@@ -1,6 +1,6 @@
 {
   "date": "2026-11-11",
-  "production_deployed": false,
+  "production_deployed": true,
   "production_access_verified": false,
   "production_agent_installed": false,
   "worker_runtime": "actual Worker/D1/Durable Object",
@@ -22,5 +22,10 @@
   "manager_tests_passed": 193,
   "ssh_install_pipeline_test": "actual SSH transport to test SSH service; installer command not executed",
   "typescript_passed": true,
-  "web_build_passed": true
+  "web_build_passed": true,
+  "production_commit": "873221bb5fe477a631e363667c72f47cd840a1fb",
+  "production_worker_version": "b807d32f-03fe-42b8-aaad-48a47f562273",
+  "production_build_id": "5753a306-f744-42bb-ae25-bdf06cbd3d0c",
+  "production_build_conclusion": "success",
+  "production_update_missing_secret_status": 401
 }

@@ -1,6 +1,6 @@
 # ShellAtlas 监控接入：实施与运行记录
 
-更新时间：2026-11-11。**代码已实现并完成本地实时链路验收；尚未部署到 `p.ecume.de`，未在真实服务器执行 Agent 安装。**
+更新时间：2026-11-11。**CFSM 已通过 Workers Builds 部署到 `p.ecume.de`；ShellAtlas 接入代码与本地实时链路已验收。真实 Service Token 联调及真实服务器安装仍待验收。**
 
 ## 已实现
 
@@ -107,3 +107,15 @@ npm run dev:integration
 前端 TypeScript 检查、Node standalone 构建、监控新增组件 lint 均通过。生产建议沿用 ShellAtlas 现有的同源 `/api` 反向代理；本轮没有改变会话 Cookie 的域与 SameSite 策略。
 
 用户截图已确认 Workers Builds：`buall/CF-Server-Monitor` 的 `main`，构建命令 `npm run build:frontend`，部署命令 `npx wrangler deploy`，Worker 为 `cf-server-monitor`。本次保持 D1/DO 绑定声明，使用 `keep_vars = true` 保留现有运行时变量。
+
+## 首次生产部署成功
+
+已按用户提供的作者 `buall <tearth1212@gmail.com>` 将功能提交 `873221bb5fe477a631e363667c72f47cd840a1fb` 推送到 `buall/CF-Server-Monitor` 的 `main`。
+
+GitHub 的 Cloudflare 官方检查 `Workers Builds: cf-server-monitor` 返回 `completed / success`：
+
+- Build ID：`5753a306-f744-42bb-ae25-bdf06cbd3d0c`
+- Worker Version ID：`b807d32f-03fe-42b8-aaad-48a47f562273`
+- 现有 `/update` 对空上报密钥返回 401，原上报鉴权继续生效；集成入口仍受 Access 保护。
+
+上述证明仓库自动发布成功；真实 Service Token 的应用访问验证仍需要在 ShellAtlas 服务端配置用户保存的 Client ID / Secret，不能用构建成功代替该验证。原 ShellAtlas Manager 8787 进程仍未被本轮替换；本地接入验收服务位于 8792 / localhost:3001。
