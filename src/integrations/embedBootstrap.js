@@ -1,9 +1,8 @@
 // Serialized into embed HTML before the untouched theme modules run.
 export function embedBootstrap(context) {
   const base = context.base;
-  const rootSelector = context.theme === 'builtin' ? '#app' : '#root';
-  const cardSelector = context.theme === 'builtin' ? '.servers-grid > .server-card' : 'article.server-card';
-  const cardInset = context.theme === 'junimo' ? 8 : 0;
+  let card = null;
+  const cardInset = context.theme === 'junimo' ? 8 : context.theme === 'generic' ? 12 : 0;
   const nativeFetch = window.fetch.bind(window);
   const NativeWebSocket = window.WebSocket;
   const mapUrl = value => {
@@ -57,45 +56,83 @@ export function embedBootstrap(context) {
   } catch { /* Fail closed rather than using credentials from the parent origin. */
     document.documentElement.dataset.embedFailed = 'true';
   }
+  const findCard = () => {
+    const visible = nodes => [...nodes].filter(node => node.getBoundingClientRect().width > 0);
+    // Themes use anchors, articles, divs and table rows for the same node.
+    // The API still scopes the data; these selectors only isolate its display.
+    for (const selector of ['.server-card', '.srv-card', '.node-card', '[data-server-id]', '[data-node-id]', '[data-node-uuid]', '.server-item', '.node-item']) {
+      const all = [...document.querySelectorAll(selector)];
+      // A theme may replace the card after rendering. The path filter briefly
+      // hides that new element until it receives the embed marker again.
+      if (all.length === 1) return all[0];
+      const candidates = visible(all);
+      if (candidates.length === 1) return candidates[0];
+    }
+    if (context.nodeName) {
+      const articles = [...document.querySelectorAll('article')].filter(node => node.textContent.includes(context.nodeName));
+      if (articles.length === 1) return articles[0];
+    }
+    if (context.nodeId) {
+      const link = [...document.querySelectorAll('a[href]')].find(node => {
+        try {
+          const url = new URL(node.getAttribute('href'), location.href);
+          return url.origin === location.origin && `${url.pathname}${url.hash}`.includes(context.nodeId);
+        } catch { return false; }
+      });
+      if (link) {
+        const semantic = link.closest('.server-card,.node-card,article,li,tr,[data-server-id],[data-node-id]');
+        if (semantic) return semantic;
+        for (let node = link; node && node !== document.body; node = node.parentElement) {
+          const text = node.textContent || '';
+          if (/CPU/i.test(text) && /RAM|Memory|内存/i.test(text) && /Disk|磁盘/i.test(text)) return node;
+        }
+      }
+    }
+    const rows = visible(document.querySelectorAll('tbody > tr'));
+    return rows.length === 1 ? rows[0] : null;
+  };
   const style = document.createElement('style');
   style.textContent = `html,body{margin:0!important;background:transparent!important}
-    ${rootSelector}{visibility:hidden;padding:${cardInset}px!important;box-sizing:border-box}html[data-embed-ready] ${rootSelector}{visibility:visible}
+    html:not([data-embed-ready]) body>:not(#embed-status){visibility:hidden}
+    #app,#root{padding:${cardInset}px!important;box-sizing:border-box}
     [data-embed-path]{display:block!important;min-height:0!important;height:auto!important;max-width:none!important;padding:0!important;margin:0!important;grid-template-columns:1fr!important;gap:0!important}
-    [data-embed-path]>:not([data-embed-path]):not(.server-card){display:none!important}
-    .server-card{width:100%!important;box-sizing:border-box!important;margin:0!important}
+    [data-embed-path]>:not([data-embed-path]):not([data-embed-card]):not(#embed-status){display:none!important}
+    [data-embed-card]{width:100%!important;max-width:none!important;box-sizing:border-box!important;margin:0!important;visibility:visible}
     .server-card-detail-link{display:none!important}
     #embed-status{padding:16px;font:14px system-ui;color:#64748b}`;
   document.head.appendChild(style);
   const postHeight = () => {
-    const card = document.querySelector(cardSelector);
-    if (!card || !context.parentOrigin) return;
+    if (!card?.isConnected || !context.parentOrigin) return;
     parent.postMessage({ type: 'shellatlas:monitor-height', height: Math.ceil(card.getBoundingClientRect().height + cardInset * 2), serverId: context.serverId }, context.parentOrigin);
   };
   document.addEventListener('DOMContentLoaded', () => {
-    const root = document.querySelector(rootSelector);
     const status = document.createElement('div');
     status.id = 'embed-status';
     status.textContent = '正在加载探针…';
     document.body.appendChild(status);
-    let card = null;
     const resize = new ResizeObserver(postHeight);
     const adapt = () => {
       document.querySelectorAll('img[src],link[href],script[src]').forEach(mapAsset);
-      const cards = document.querySelectorAll(cardSelector);
-      if (cards.length !== 1 || document.documentElement.dataset.embedFailed) return;
-      for (let node = cards[0].parentElement; node && node !== document.body; node = node.parentElement) {
-        if (!node.hasAttribute('data-embed-path')) node.setAttribute('data-embed-path', '');
+      const nextCard = findCard();
+      if (!nextCard || document.documentElement.dataset.embedFailed) return;
+      if (card !== nextCard) {
+        document.querySelectorAll('[data-embed-card],[data-embed-path]').forEach(node => {
+          node.removeAttribute('data-embed-card'); node.removeAttribute('data-embed-path');
+        });
+        nextCard.setAttribute('data-embed-card', '');
       }
-      if (card !== cards[0]) { resize.disconnect(); card = cards[0]; resize.observe(card); }
+      for (let node = nextCard.parentElement; node; node = node.parentElement) {
+        if (!node.hasAttribute('data-embed-path')) node.setAttribute('data-embed-path', '');
+        if (node === document.body) break;
+      }
+      if (card !== nextCard) { resize.disconnect(); card = nextCard; resize.observe(card); }
       document.documentElement.setAttribute('data-embed-ready', '');
       status.hidden = true;
       postHeight();
     };
-    if (root) {
-      const observer = new MutationObserver(adapt);
-      observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'href'] });
-      addEventListener('pagehide', () => { observer.disconnect(); resize.disconnect(); }, { once: true });
-    }
+    const observer = new MutationObserver(adapt);
+    observer.observe(document.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: ['src', 'href'] });
+    addEventListener('pagehide', () => { observer.disconnect(); resize.disconnect(); }, { once: true });
     adapt();
     setTimeout(() => {
       if (!card) {

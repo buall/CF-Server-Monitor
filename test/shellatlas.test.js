@@ -21,8 +21,12 @@ test('embed follows the configured theme by default and retains explicit overrid
   assert.deepEqual(resolveEmbedTheme({ theme_url: '' }), { theme: 'builtin', themeUrl: '' });
   assert.deepEqual(resolveEmbedTheme({ theme_url: JUNIMO_THEME }, { SHELLATLAS_EMBED_THEME: 'luminaplus' }), { theme: 'luminaplus', themeUrl: LUMINA_THEME });
   assert.deepEqual(resolveEmbedTheme({ theme_url: JUNIMO_THEME }, { SHELLATLAS_EMBED_THEME: 'builtin' }), { theme: 'builtin', themeUrl: '' });
-  for (const theme_url of ['https://github.com/unknown/theme/tree/' + 'a'.repeat(40), 'https://github.com/huilang-me/cfsm-junimo/tree/main', 'https://evil.example/huilang-me/cfsm-junimo/tree/' + 'a'.repeat(40)]) {
-    assert.throws(() => resolveEmbedTheme({ theme_url }), /暂不支持单卡嵌入/);
+  for (const repository of ['finch-xu/CF-Server-Monitor-theme-win2000', 'Tokinx/cf-server-monitor-theme-emerald', 'loongkong/cf-server-monitor-theme-pulse', 'akasls/Horizon-CF-Server-Monitor', 'LanHuangJG/cf-server-monitor-theme-shadcn', 'allury/CFSM-Glassmorphism', 'WAOR/CFSM-SAO', 'Vegas7/CFSM-Theme-AnotherLuminaPlus', 'ayingQAQ/cf-monitor-theme-hahaha', 'huilang-me/CFSM-CRT', 'custom-owner/custom-theme']) {
+    const themeUrl = `https://github.com/${repository}/tree/${'a'.repeat(40)}`;
+    assert.deepEqual(resolveEmbedTheme({ theme_url: themeUrl }), { theme: 'generic', themeUrl });
+  }
+  for (const theme_url of ['https://github.com/huilang-me/cfsm-junimo/tree/main', 'https://evil.example/huilang-me/cfsm-junimo/tree/' + 'a'.repeat(40)]) {
+    assert.throws(() => resolveEmbedTheme({ theme_url }), /GitHub 发布版本/);
   }
 });
 
@@ -108,6 +112,8 @@ test('authenticated integration provisions idempotently and returns only one D1 
           ? new Response('@font-face{src:url("/assets/fonts/pixel.woff2")}')
           : new Response('<html><head><script type="module" src="/assets/junimo.js"></script></head><body><div id="root"></div></body></html>');
       }
+      if (url.includes('raw.githubusercontent.com/finch-xu/')) return new Response('<html><head><script type="module" src="/assets/win2000.js"></script></head><body><div id="app"></div></body></html>');
+      if (url.includes('raw.githubusercontent.com/missing/')) return new Response('not found', { status: 404 });
       throw new Error(`Unexpected outbound request: ${url}`);
     };
     const jwt = await new SignJWT({sub:'',common_name:'shellatlas.access'}).setProtectedHeader({alg:'RS256',kid:'integration'})
@@ -155,6 +161,14 @@ test('authenticated integration provisions idempotently and returns only one D1 
     const css = await call(`nodes/${a}/embed/assets/junimo.css`, 'GET', null, embedHeaders);
     assert.equal(css.status, 200);
     assert.ok((await css.text()).includes(`/api/v1/servers/${b}/monitor/embed/assets/fonts/pixel.woff2`));
+    await selectTheme(`https://github.com/finch-xu/CF-Server-Monitor-theme-win2000/tree/${'a'.repeat(40)}`);
+    const win2000 = await call(`nodes/${a}/embed/`, 'GET', null, embedHeaders);
+    assert.equal(win2000.status, 200);
+    assert.ok((await win2000.text()).includes(`/api/v1/servers/${b}/monitor/embed/assets/win2000.js`));
+    await selectTheme(`https://github.com/missing/theme/tree/${'a'.repeat(40)}`);
+    const missing = await call(`nodes/${a}/embed/`, 'GET', null, embedHeaders);
+    assert.equal(missing.status, 502);
+    assert.equal((await missing.json()).code, 'CFSM_THEME_LOAD_FAILED');
   } finally {
     globalThis.fetch = originalFetch;
     clearServersListCache();

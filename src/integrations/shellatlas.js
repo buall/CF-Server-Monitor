@@ -10,7 +10,7 @@ import { CURRENT_VERSION } from '../utils/config.js';
 import { markFrontendRealtimeActive } from '../utils/realtimeBroadcastGate.js';
 
 export const LUMINA_THEME = 'https://github.com/volcano-1025/CFSM-Theme-LuminaPlus/tree/7833a6075ea95fa429f9af794b036156579615f8';
-const EMBED_THEME_REPOS = new Map([
+const EMBED_THEME_HINTS = new Map([
   ['volcano-1025/cfsm-theme-luminaplus', 'luminaplus'],
   ['huilang-me/cfsm-junimo', 'junimo']
 ]);
@@ -34,10 +34,14 @@ export function resolveEmbedTheme(settings, env = {}) {
   let url;
   try { url = new URL(themeUrl); } catch { throw new IntegrationError('当前主题地址无效', 503); }
   const parts = url.pathname.split('/').filter(Boolean);
-  const theme = EMBED_THEME_REPOS.get(`${parts[0]}/${parts[1]}`.toLowerCase());
+  const theme = EMBED_THEME_HINTS.get(`${parts[0]}/${parts[1]}`.toLowerCase()) || 'generic';
   if (url.origin !== 'https://github.com' || url.username || url.password || url.search || url.hash ||
-      parts.length !== 4 || parts[2] !== 'tree' || !/^[a-f0-9]{40}$/i.test(parts[3]) || !theme) {
-    throw new IntegrationError('当前主题暂不支持单卡嵌入，请在 CFSM 中选择 Junimo、LuminaPlus 或内置主题', 503);
+      parts.length < 4 || !parts.slice(0, 2).every(part => /^[A-Za-z0-9._-]+$/.test(part)) ||
+      parts[2] !== 'tree' || !/^[a-f0-9]{40}$/i.test(parts[3]) ||
+      parts.slice(4).some(part => !/^[A-Za-z0-9._-]+$/.test(part) || part === '.' || part === '..')) {
+    const error = new IntegrationError('主题地址须为 GitHub 发布版本的完整 commit 地址，请在 CFSM 后台重新选择主题版本', 422);
+    error.code = 'CFSM_THEME_INVALID';
+    throw error;
   }
   return { theme, themeUrl };
 }
@@ -58,7 +62,7 @@ export function embedContext(request, nodeId) {
     }
     parentOrigin = parsed.origin;
   }
-  return { base: supplied || ownBase, parentOrigin, serverId: supplied?.split('/')[4] || nodeId };
+  return { base: supplied || ownBase, parentOrigin, nodeId, serverId: supplied?.split('/')[4] || nodeId };
 }
 
 export function renderEmbed(html, context) {
@@ -83,7 +87,8 @@ function scopedConfig(settings) {
     turnstile_enabled: false, turnstile_login_enabled: false,
     site_title: settings.site_title || 'ShellAtlas', default_language: settings.default_language || 'zh',
     preferred_theme: settings.preferred_theme || 'auto', display_mode: 'bar',
-    theme_options: { showConnections: true, ...settings.theme_options },
+    theme_options: { showConnections: true, ...settings.theme_options,
+      desktopNodeViewMode: 'large', mobileNodeViewMode: 'large', hiddenNodes: [] },
     frontend_ws_timeout_minutes: 0, latency_window: { points: 20, hours: 2 }
   };
   for (const name of ['custom_ct_name', 'custom_cu_name', 'custom_cm_name', 'custom_bd_name', 'node_1_name', 'node_2_name', 'node_3_name', 'node_4_name']) {
@@ -161,9 +166,13 @@ export async function handleShellAtlas(request, env, ctx) {
       custom_head: '', custom_script: '', custom_bg: '', custom_bg_mobile: '', favicon: '' };
     const embedEnv = { ...env, API_BASE: '' };
     if (suffix === 'embed/' || suffix === 'embed') {
-      const context = { ...embedContext(request, nodeId), theme };
+      const context = { ...embedContext(request, nodeId), theme, nodeName: server.name };
       const response = await serveFrontend(new Request(`${url.origin}/`), embedEnv, embedSettings);
-      if (!response.ok) return response;
+      if (!response.ok) {
+        const error = new IntegrationError('当前主题发布文件加载失败，请在 CFSM 后台检查主题版本或重新选择主题', 502);
+        error.code = 'CFSM_THEME_LOAD_FAILED';
+        throw error;
+      }
       const headers = new Headers(response.headers);
       headers.delete('X-Frame-Options');
       headers.set('Content-Security-Policy', `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; frame-ancestors 'self'${context.parentOrigin ? ` ${context.parentOrigin}` : ''}; object-src 'none'; base-uri 'self'; form-action 'none'`);
@@ -188,7 +197,7 @@ export async function handleShellAtlas(request, env, ctx) {
     }
     throw new IntegrationError('Integration route not found', 404);
   } catch (error) {
-    if (error instanceof IntegrationError) return json({ error: error.message }, error.status);
+    if (error instanceof IntegrationError) return json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, error.status);
     console.error('[ShellAtlas] Integration request failed:', error.message);
     return json({ error: 'Monitor integration request failed' }, 500);
   }

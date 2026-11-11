@@ -123,3 +123,9 @@ GitHub 的 Cloudflare 官方检查 `Workers Builds: cf-server-monitor` 返回 `c
 ## 主题跟随修复（2026-11-11）
 
 原配置强制把嵌入页渲染为固定 LuminaPlus，即使主站切换 Junimo 也不会改变。默认模式已改为 `site`，读取后台保存的 `theme_url` 和主题选项；HTML 与静态资源使用同一主题发布 SHA。支持内置、LuminaPlus 和 Junimo；未知主题保持明确报错。Junimo 字体使用受限的 embed 静态资源路径，像素边框保留 8px 留白。
+
+## 通用主题单卡适配（2026-11-11）
+
+移除 Junimo/LuminaPlus 仓库白名单；主题仍须使用后台保存的 GitHub 完整发布 SHA。单卡定位改为识别卡片语义类、节点 ID 链接或公开名称，不依赖单一根节点/HTML 标签；支持主题更新数据时替换卡片 DOM，避免被旧路径过滤规则误隐藏。主题资源加载失败返回专门错误码，Manager 区分主题错误与 Access/实时服务错误。
+
+本地浏览器使用真实发布文件验收：Emerald、Pulse、LuminaPlus、Horizon、Junimo、Shadcn、Glassmorphism、Win2000、SAO、AnotherLuminaPlus、hahaha、CRT，均成功定位并渲染单个节点；元数据与静态资源仅使用隔离测试库。
