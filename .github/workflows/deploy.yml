@@ -82,7 +82,7 @@ jobs:
           CORS_ALLOWED_ORIGINS = "CORS_ORIGINS_PLACEHOLDER"
           SHELLATLAS_ACCESS_TEAM_DOMAIN = "https://tearth.cloudflareaccess.com"
           SHELLATLAS_ACCESS_AUD = "491a1155ff642ffb49c9fa9b26d1eff6853ebc8d18156b097b41c5f9ce55edd1"
-          SHELLATLAS_EMBED_THEME = "luminaplus"
+          SHELLATLAS_EMBED_THEME = "site"
           WEOF
 
           # 替换占位符

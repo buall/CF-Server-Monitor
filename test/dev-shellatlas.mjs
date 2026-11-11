@@ -32,7 +32,7 @@ const mf = new Miniflare({
   modules:true, script:await readFile(path.join(root,'.wrangler/shellatlas-build/index.js'),'utf8'), compatibilityDate:'2024-12-01', compatibilityFlags:['nodejs_compat'],
   d1Databases:{DB:'shellatlas-local'}, durableObjects:{METRICS_BROADCASTER:{className:'MetricsBroadcaster',useSQLite:true}},
   d1Persist:path.join(runtimeDir,'cfsm-d1'), durableObjectsPersist:path.join(runtimeDir,'cfsm-do'),
-  bindings:{ API_SECRET:agentSecret, SHELLATLAS_ACCESS_TEAM_DOMAIN:issuer, SHELLATLAS_ACCESS_AUD:audience, SHELLATLAS_ACCESS_CLIENT_ID:clientId },
+  bindings:{ API_SECRET:agentSecret, SHELLATLAS_ACCESS_TEAM_DOMAIN:issuer, SHELLATLAS_ACCESS_AUD:audience, SHELLATLAS_ACCESS_CLIENT_ID:clientId, SHELLATLAS_EMBED_THEME:'luminaplus' },
   serviceBindings:{ASSETS:request => fileResponse(path.join(root,'dist'),new URL(request.url).pathname.slice(1))},
   outboundService: async request => {
     const url = new URL(request.url);

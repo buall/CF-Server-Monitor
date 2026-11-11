@@ -10,6 +10,10 @@ import { CURRENT_VERSION } from '../utils/config.js';
 import { markFrontendRealtimeActive } from '../utils/realtimeBroadcastGate.js';
 
 export const LUMINA_THEME = 'https://github.com/volcano-1025/CFSM-Theme-LuminaPlus/tree/7833a6075ea95fa429f9af794b036156579615f8';
+const EMBED_THEME_REPOS = new Map([
+  ['volcano-1025/cfsm-theme-luminaplus', 'luminaplus'],
+  ['huilang-me/cfsm-junimo', 'junimo']
+]);
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const NODE_ROUTE = new RegExp(`^/integrations/shellatlas/nodes/(${UUID})(?:/(.*))?$`, 'i');
 const PROXY_BASE = new RegExp(`^/api/v1/servers/${UUID}/monitor/embed/$`, 'i');
@@ -18,6 +22,24 @@ function json(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: {
     'Content-Type': 'application/json', 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff'
   } });
+}
+
+export function resolveEmbedTheme(settings, env = {}) {
+  const mode = env.SHELLATLAS_EMBED_THEME || 'site';
+  if (mode === 'builtin') return { theme: 'builtin', themeUrl: '' };
+  if (mode === 'luminaplus') return { theme: 'luminaplus', themeUrl: LUMINA_THEME };
+  if (mode !== 'site') throw new IntegrationError('Unsupported embed theme', 503);
+  const themeUrl = String(settings.theme_url || '').trim();
+  if (!themeUrl) return { theme: 'builtin', themeUrl: '' };
+  let url;
+  try { url = new URL(themeUrl); } catch { throw new IntegrationError('当前主题地址无效', 503); }
+  const parts = url.pathname.split('/').filter(Boolean);
+  const theme = EMBED_THEME_REPOS.get(`${parts[0]}/${parts[1]}`.toLowerCase());
+  if (url.origin !== 'https://github.com' || url.username || url.password || url.search || url.hash ||
+      parts.length !== 4 || parts[2] !== 'tree' || !/^[a-f0-9]{40}$/i.test(parts[3]) || !theme) {
+    throw new IntegrationError('当前主题暂不支持单卡嵌入，请在 CFSM 中选择 Junimo、LuminaPlus 或内置主题', 503);
+  }
+  return { theme, themeUrl };
 }
 
 
@@ -50,12 +72,18 @@ export function renderEmbed(html, context) {
   return html.replace(/<head\b[^>]*>/i, match => `${match}${bootstrap}`);
 }
 
+export function rewriteEmbedStyles(css, base) {
+  return css.replace(/url\(\s*(["']?)\/(assets|static|flags|os-icons|files)\//gi,
+    (_, quote, directory) => `url(${quote}${base}${directory}/`);
+}
+
 function scopedConfig(settings) {
   const config = {
     version: CURRENT_VERSION, is_public: true, authorization: false,
     turnstile_enabled: false, turnstile_login_enabled: false,
     site_title: settings.site_title || 'ShellAtlas', default_language: settings.default_language || 'zh',
-    preferred_theme: settings.preferred_theme || 'auto', display_mode: 'bar', theme_options: { showConnections: true },
+    preferred_theme: settings.preferred_theme || 'auto', display_mode: 'bar',
+    theme_options: { showConnections: true, ...settings.theme_options },
     frontend_ws_timeout_minutes: 0, latency_window: { points: 20, hours: 2 }
   };
   for (const name of ['custom_ct_name', 'custom_cu_name', 'custom_cm_name', 'custom_bd_name', 'node_1_name', 'node_2_name', 'node_3_name', 'node_4_name']) {
@@ -128,9 +156,8 @@ export async function handleShellAtlas(request, env, ctx) {
       return stub.fetch(new Request('http://internal/ws?subscribe=all', { headers }));
     }
 
-    const theme = env.SHELLATLAS_EMBED_THEME || 'luminaplus';
-    if (!['builtin', 'luminaplus'].includes(theme)) throw new IntegrationError('Unsupported embed theme', 503);
-    const embedSettings = { ...settings, theme_url: theme === 'builtin' ? '' : LUMINA_THEME,
+    const { theme, themeUrl } = resolveEmbedTheme(settings, env);
+    const embedSettings = { ...settings, theme_url: themeUrl,
       custom_head: '', custom_script: '', custom_bg: '', custom_bg_mobile: '', favicon: '' };
     const embedEnv = { ...env, API_BASE: '' };
     if (suffix === 'embed/' || suffix === 'embed') {
@@ -153,6 +180,10 @@ export async function handleShellAtlas(request, env, ctx) {
       headers.delete('X-CFSM-Theme-Asset');
       headers.set('Cache-Control', 'private, max-age=3600');
       if (headers.get('Content-Type')?.includes('text/html')) throw new IntegrationError('Asset not found', 404);
+      if (headers.get('Content-Type')?.includes('text/css')) {
+        const context = embedContext(request, nodeId);
+        return new Response(rewriteEmbedStyles(await response.text(), context.base), { status: response.status, headers });
+      }
       return new Response(response.body, { status: response.status, headers });
     }
     throw new IntegrationError('Integration route not found', 404);

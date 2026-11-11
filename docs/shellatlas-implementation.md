@@ -49,7 +49,7 @@ ShellAtlas 实际接口与权限说明已写入 `services/manager/openapi.yaml`�
 ```text
 SHELLATLAS_ACCESS_TEAM_DOMAIN=https://tearth.cloudflareaccess.com
 SHELLATLAS_ACCESS_AUD=491a1155ff642ffb49c9fa9b26d1eff6853ebc8d18156b097b41c5f9ce55edd1
-SHELLATLAS_EMBED_THEME=luminaplus
+SHELLATLAS_EMBED_THEME=site
 ```
 
 可选 `SHELLATLAS_ACCESS_CLIENT_ID` 用于进一步限制确切的 Service Token；未配置时仍必须是该 Access 应用签发的服务身份。Service Token 的 Client Secret 不需要保存到 CFSM，只由 ShellAtlas Manager 使用。
@@ -119,3 +119,7 @@ GitHub 的 Cloudflare 官方检查 `Workers Builds: cf-server-monitor` 返回 `c
 - 现有 `/update` 对空上报密钥返回 401，原上报鉴权继续生效；集成入口仍受 Access 保护。
 
 上述证明仓库自动发布成功；真实 Service Token 的应用访问验证仍需要在 ShellAtlas 服务端配置用户保存的 Client ID / Secret，不能用构建成功代替该验证。原 ShellAtlas Manager 8787 进程仍未被本轮替换；本地接入验收服务位于 8792 / localhost:3001。
+
+## 主题跟随修复（2026-11-11）
+
+原配置强制把嵌入页渲染为固定 LuminaPlus，即使主站切换 Junimo 也不会改变。默认模式已改为 `site`，读取后台保存的 `theme_url` 和主题选项；HTML 与静态资源使用同一主题发布 SHA。支持内置、LuminaPlus 和 Junimo；未知主题保持明确报错。Junimo 字体使用受限的 embed 静态资源路径，像素边框保留 8px 留白。

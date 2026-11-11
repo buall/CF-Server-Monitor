@@ -2,16 +2,40 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { generateKeyPair, exportJWK, createLocalJWKSet, SignJWT } from 'jose';
 import { requireShellAtlasAccess } from '../src/integrations/access.js';
-import { embedContext, renderEmbed, handleShellAtlas } from '../src/integrations/shellatlas.js';
+import { embedContext, renderEmbed, rewriteEmbedStyles, resolveEmbedTheme, LUMINA_THEME, handleShellAtlas } from '../src/integrations/shellatlas.js';
 import { publicMetrics } from '../src/integrations/fields.js';
 import { MetricsBroadcaster } from '../src/durable/MetricsBroadcaster.js';
 import { Miniflare } from 'miniflare';
 import { initDatabase } from '../src/database/schema.js';
 import { clearServersListCache } from '../src/utils/cache.js';
+import { clearSiteSettingsCache, clearAppearanceSettingsCache } from '../src/utils/settings.js';
 
 const a = '11111111-1111-4111-8111-111111111111';
 const b = '22222222-2222-4222-8222-222222222222';
 const env = { SHELLATLAS_ACCESS_TEAM_DOMAIN: 'https://test.cloudflareaccess.com', SHELLATLAS_ACCESS_AUD: 'application-a', SHELLATLAS_ACCESS_CLIENT_ID: 'shellatlas.access' };
+const JUNIMO_THEME = 'https://github.com/huilang-me/cfsm-junimo/tree/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+test('embed follows the configured theme by default and retains explicit overrides', () => {
+  assert.deepEqual(resolveEmbedTheme({ theme_url: JUNIMO_THEME }), { theme: 'junimo', themeUrl: JUNIMO_THEME });
+  assert.deepEqual(resolveEmbedTheme({ theme_url: LUMINA_THEME }), { theme: 'luminaplus', themeUrl: LUMINA_THEME });
+  assert.deepEqual(resolveEmbedTheme({ theme_url: '' }), { theme: 'builtin', themeUrl: '' });
+  assert.deepEqual(resolveEmbedTheme({ theme_url: JUNIMO_THEME }, { SHELLATLAS_EMBED_THEME: 'luminaplus' }), { theme: 'luminaplus', themeUrl: LUMINA_THEME });
+  assert.deepEqual(resolveEmbedTheme({ theme_url: JUNIMO_THEME }, { SHELLATLAS_EMBED_THEME: 'builtin' }), { theme: 'builtin', themeUrl: '' });
+  for (const theme_url of ['https://github.com/unknown/theme/tree/' + 'a'.repeat(40), 'https://github.com/huilang-me/cfsm-junimo/tree/main', 'https://evil.example/huilang-me/cfsm-junimo/tree/' + 'a'.repeat(40)]) {
+    assert.throws(() => resolveEmbedTheme({ theme_url }), /暂不支持单卡嵌入/);
+  }
+});
+
+test('embedded theme fonts use the scoped asset path without rewriting data or external URLs', () => {
+  const base = `/api/v1/servers/${b}/monitor/embed/`;
+  const css = '@font-face{src:url("/assets/fonts/pixel.woff2")} .icon{mask:url(/assets/icon.svg)} .relative{background:url(./file.svg)} .external{background:url(https://static.example/file.svg)} .inline{background:url("data:image/svg+xml,a")}';
+  const result = rewriteEmbedStyles(css, base);
+  assert.ok(result.includes(`url("${base}assets/fonts/pixel.woff2")`));
+  assert.ok(result.includes(`url(${base}assets/icon.svg)`));
+  assert.ok(result.includes('url(./file.svg)'));
+  assert.ok(result.includes('url(https://static.example/file.svg)'));
+  assert.ok(result.includes('url("data:image/svg+xml,a")'));
+});
 
 test('Access validates signature, issuer, audience, expiry and service identity', async () => {
   const { privateKey, publicKey } = await generateKeyPair('RS256');
@@ -79,6 +103,11 @@ test('authenticated integration provisions idempotently and returns only one D1 
       const url = String(value);
       if (url === `${env.SHELLATLAS_ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`) return Response.json({keys:[jwk]});
       if (url.includes('raw.githubusercontent.com/volcano-1025/')) return new Response('<html><head><script type="module" src="/assets/original.js"></script></head><body><div id="root"></div></body></html>');
+      if (url.includes('raw.githubusercontent.com/huilang-me/cfsm-junimo/')) {
+        return url.endsWith('.css')
+          ? new Response('@font-face{src:url("/assets/fonts/pixel.woff2")}')
+          : new Response('<html><head><script type="module" src="/assets/junimo.js"></script></head><body><div id="root"></div></body></html>');
+      }
       throw new Error(`Unexpected outbound request: ${url}`);
     };
     const jwt = await new SignJWT({sub:'',common_name:'shellatlas.access'}).setProtectedHeader({alg:'RS256',kid:'integration'})
@@ -104,14 +133,33 @@ test('authenticated integration provisions idempotently and returns only one D1 
     assert.equal(data.stats.total,1);
     assert.equal((await call(`nodes/${a}/embed/api/history/all`)).status,404);
     assert.equal((await call(`nodes/${a}/embed/admin/api`,'POST',{})).status,405);
+    const selectTheme = async theme_url => {
+      await db.prepare("INSERT INTO settings (key,value) VALUES ('site_options',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(JSON.stringify({theme_url})).run();
+      clearSiteSettingsCache();
+      clearAppearanceSettingsCache();
+    };
+    await selectTheme(LUMINA_THEME);
     const page = await call(`nodes/${a}/embed/`,'GET',null,{'X-ShellAtlas-Embed-Base':`/api/v1/servers/${b}/monitor/embed/`,'X-ShellAtlas-Parent-Origin':'https://atlas.example'});
     assert.equal(page.status,200);
     assert.equal(page.headers.get('X-Frame-Options'),null);
     assert.ok(page.headers.get('Content-Security-Policy').includes("frame-ancestors 'self' https://atlas.example"));
     assert.ok((await page.text()).includes(`/api/v1/servers/${b}/monitor/embed/assets/original.js`));
+    await selectTheme(JUNIMO_THEME);
+    const embedHeaders = { 'X-ShellAtlas-Embed-Base': `/api/v1/servers/${b}/monitor/embed/`, 'X-ShellAtlas-Parent-Origin': 'https://atlas.example' };
+    const junimo = await call(`nodes/${a}/embed/`, 'GET', null, embedHeaders);
+    const junimoHtml = await junimo.text();
+    assert.equal(junimo.status, 200);
+    assert.ok(junimoHtml.includes(`/api/v1/servers/${b}/monitor/embed/assets/junimo.js`));
+    assert.ok(junimoHtml.includes('"theme":"junimo"'));
+    assert.ok(!junimoHtml.includes('assets/original.js'));
+    const css = await call(`nodes/${a}/embed/assets/junimo.css`, 'GET', null, embedHeaders);
+    assert.equal(css.status, 200);
+    assert.ok((await css.text()).includes(`/api/v1/servers/${b}/monitor/embed/assets/fonts/pixel.woff2`));
   } finally {
     globalThis.fetch = originalFetch;
     clearServersListCache();
+    clearSiteSettingsCache();
+    clearAppearanceSettingsCache();
     await miniflare.dispose();
   }
 });

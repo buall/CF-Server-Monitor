@@ -3,6 +3,7 @@ export function embedBootstrap(context) {
   const base = context.base;
   const rootSelector = context.theme === 'builtin' ? '#app' : '#root';
   const cardSelector = context.theme === 'builtin' ? '.servers-grid > .server-card' : 'article.server-card';
+  const cardInset = context.theme === 'junimo' ? 8 : 0;
   const nativeFetch = window.fetch.bind(window);
   const NativeWebSocket = window.WebSocket;
   const mapUrl = value => {
@@ -39,7 +40,9 @@ export function embedBootstrap(context) {
   const local = new Map([['monitor_preferred_view', 'bar']]);
   const session = new Map([
     ['cfsm-luminaplus:node-view-mode-session:desktop', 'large'],
-    ['cfsm-luminaplus:node-view-mode-session:mobile', 'large']
+    ['cfsm-luminaplus:node-view-mode-session:mobile', 'large'],
+    ['cfsm-junimo:node-view-mode-session:desktop', 'large'],
+    ['cfsm-junimo:node-view-mode-session:mobile', 'large']
   ]);
   const storage = values => ({
     getItem: key => values.get(String(key)) ?? null,
@@ -56,7 +59,7 @@ export function embedBootstrap(context) {
   }
   const style = document.createElement('style');
   style.textContent = `html,body{margin:0!important;background:transparent!important}
-    ${rootSelector}{visibility:hidden}html[data-embed-ready] ${rootSelector}{visibility:visible}
+    ${rootSelector}{visibility:hidden;padding:${cardInset}px!important;box-sizing:border-box}html[data-embed-ready] ${rootSelector}{visibility:visible}
     [data-embed-path]{display:block!important;min-height:0!important;height:auto!important;max-width:none!important;padding:0!important;margin:0!important;grid-template-columns:1fr!important;gap:0!important}
     [data-embed-path]>:not([data-embed-path]):not(.server-card){display:none!important}
     .server-card{width:100%!important;box-sizing:border-box!important;margin:0!important}
@@ -66,7 +69,7 @@ export function embedBootstrap(context) {
   const postHeight = () => {
     const card = document.querySelector(cardSelector);
     if (!card || !context.parentOrigin) return;
-    parent.postMessage({ type: 'shellatlas:monitor-height', height: Math.ceil(card.getBoundingClientRect().height), serverId: context.serverId }, context.parentOrigin);
+    parent.postMessage({ type: 'shellatlas:monitor-height', height: Math.ceil(card.getBoundingClientRect().height + cardInset * 2), serverId: context.serverId }, context.parentOrigin);
   };
   document.addEventListener('DOMContentLoaded', () => {
     const root = document.querySelector(rootSelector);
@@ -95,7 +98,11 @@ export function embedBootstrap(context) {
     }
     adapt();
     setTimeout(() => {
-      if (!card) status.textContent = '探针暂时无法加载，请检查节点状态或主题兼容性后重试。';
+      if (!card) {
+        const message = '探针暂时无法加载，请检查节点状态或主题兼容性后重试。';
+        status.textContent = message;
+        if (context.parentOrigin) parent.postMessage({ type: 'shellatlas:monitor-error', message, serverId: context.serverId }, context.parentOrigin);
+      }
     }, 15000);
   });
   document.addEventListener('click', event => {
