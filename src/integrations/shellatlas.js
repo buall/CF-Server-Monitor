@@ -248,7 +248,10 @@ async function handleDashboard(request, env, suffix) {
     }
     const headers = new Headers(response.headers);
     headers.delete('X-Frame-Options');
-    headers.set('Content-Security-Policy', `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self'${context.parentOrigin ? ` ${context.parentOrigin}` : ''}; object-src 'none'; base-uri 'self'; form-action 'none'`);
+    const policy = (headers.get('Content-Security-Policy') || "default-src 'self'")
+      .split(';').map(value => value.trim()).filter(value => value && !/^(frame-ancestors|base-uri|form-action)\b/.test(value));
+    policy.push(`frame-ancestors 'self'${context.parentOrigin ? ` ${context.parentOrigin}` : ''}`, "base-uri 'self'", "form-action 'none'");
+    headers.set('Content-Security-Policy', policy.join('; '));
     headers.set('Cache-Control', 'private, no-store');
     return new Response(renderEmbed(await response.text(), context), { headers });
   }
