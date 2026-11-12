@@ -98,6 +98,70 @@ export function embedBootstrap(context) {
     }, true);
     return;
   }
+  const home = new URL(location.href);
+  home.hash = '/';
+  const nativePushState = history.pushState.bind(history);
+  const nativeReplaceState = history.replaceState.bind(history);
+  let status = null;
+  let recovering = false;
+  const isHome = value => {
+    try {
+      const target = new URL(String(value), location.href);
+      const route = target.hash.slice(1).split('?')[0];
+      return target.origin === home.origin && target.pathname === home.pathname && (!route || route === '/');
+    } catch { return false; }
+  };
+  const restoreHome = () => {
+    if (recovering) return;
+    recovering = true;
+    document.documentElement.removeAttribute('data-embed-ready');
+    if (status) {
+      status.textContent = '正在返回实时监控…';
+      status.hidden = false;
+    }
+    // SPA routers can change their internal view even when a History call is
+    // ignored. Reload the permitted homepage rather than leave an empty view.
+    nativeReplaceState(history.state, '', home.href);
+    setTimeout(() => location.reload(), 0);
+  };
+  history.pushState = (data, unused, url) => {
+    if (url != null && !isHome(url)) return restoreHome();
+    return nativePushState(data, unused, url);
+  };
+  history.replaceState = (data, unused, url) => {
+    if (url != null && !isHome(url)) return restoreHome();
+    return nativeReplaceState(data, unused, url);
+  };
+  const navigationKind = element => {
+    if (!element) return '';
+    if (element === card) {
+      return element.matches('a,button,[role="button"],[role="link"]') ? 'card' : '';
+    }
+    const labels = ['aria-label', 'title'].map(name => element.getAttribute(name) || '');
+    labels.push(element.textContent || '');
+    const title = labels.some(label => context.nodeName && label.replace(/[↗↪→➜›»]/g, '').trim() === context.nodeName);
+    if (title) return 'title';
+    if (element.matches('a[href],[role="link"]') ||
+        ['href', 'to', 'data-href', 'data-to', 'formaction'].some(name => element.getAttribute(name))) return 'action';
+    return labels.some(label => /详情|详细|翻页|历史曲线|查看(?:节点|服务器|历史)|进入(?:节点|服务器)|\b(?:details?|history|view (?:node|server)|open (?:node|server))\b|^[\s↗↪→➜›»]+$/i.test(label)) ? 'action' : '';
+  };
+  const markNavigation = () => {
+    for (const element of [card, ...card.querySelectorAll('a[href],button,[role="button"],[role="link"]')]) {
+      const kind = navigationKind(element);
+      if (!kind) continue;
+      element.setAttribute('data-embed-navigation', kind);
+      element.setAttribute('tabindex', '-1');
+      if (kind !== 'card') element.setAttribute('aria-disabled', 'true');
+    }
+  };
+  const blockNavigation = event => {
+    if (event.type === 'keydown' && !['Enter', ' ', 'Spacebar'].includes(event.key)) return;
+    const control = event.target?.closest?.('a,button,[role="button"],[role="link"]');
+    if (!control || !card?.contains(control) || !navigationKind(control)) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+  };
+  for (const type of ['click', 'auxclick', 'keydown']) document.addEventListener(type, blockNavigation, true);
   const findCard = () => {
     const visible = nodes => [...nodes].filter(node => node.getBoundingClientRect().width > 0);
     // Themes use anchors, articles, divs and table rows for the same node.
@@ -140,6 +204,9 @@ export function embedBootstrap(context) {
     [data-embed-path]{display:block!important;min-height:0!important;height:auto!important;max-width:none!important;padding:0!important;margin:0!important;grid-template-columns:1fr!important;gap:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:transparent!important}
     [data-embed-path]>:not([data-embed-path]):not([data-embed-card]):not(#embed-status){display:none!important}
     [data-embed-card]{width:100%!important;max-width:none!important;box-sizing:border-box!important;margin:0!important;visibility:visible;box-shadow:none!important}
+    [data-embed-navigation="action"]{display:none!important}
+    [data-embed-navigation="title"],[data-embed-navigation="card"]{cursor:default!important}
+    [data-embed-navigation="title"] svg[aria-hidden="true"]{display:none!important}
     .server-card-detail-link{display:none!important}
     #embed-status{padding:16px;font:14px system-ui;color:#64748b}`;
   document.head.appendChild(style);
@@ -148,15 +215,20 @@ export function embedBootstrap(context) {
     parent.postMessage({ type: 'shellatlas:monitor-height', height: Math.ceil(card.getBoundingClientRect().height + cardInset * 2), serverId: context.serverId }, context.parentOrigin);
   };
   document.addEventListener('DOMContentLoaded', () => {
-    const status = document.createElement('div');
+    status = document.createElement('div');
     status.id = 'embed-status';
     status.textContent = '正在加载探针…';
     document.body.appendChild(status);
     const resize = new ResizeObserver(postHeight);
     const adapt = () => {
+      if (recovering) return;
       document.querySelectorAll('img[src],link[href],script[src]').forEach(mapAsset);
       const nextCard = findCard();
-      if (!nextCard || document.documentElement.dataset.embedFailed) return;
+      if (!nextCard) {
+        if (card && !card.isConnected) restoreHome();
+        return;
+      }
+      if (document.documentElement.dataset.embedFailed) return;
       if (card !== nextCard) {
         document.querySelectorAll('[data-embed-card],[data-embed-path]').forEach(node => {
           node.removeAttribute('data-embed-card'); node.removeAttribute('data-embed-path');
@@ -168,6 +240,7 @@ export function embedBootstrap(context) {
         if (node === document.body) break;
       }
       if (card !== nextCard) { resize.disconnect(); card = nextCard; resize.observe(card); }
+      markNavigation();
       document.documentElement.setAttribute('data-embed-ready', '');
       status.hidden = true;
       postHeight();
@@ -184,9 +257,6 @@ export function embedBootstrap(context) {
       }
     }, 15000);
   });
-  document.addEventListener('click', event => {
-    if (event.target.closest('a')) { event.preventDefault(); event.stopImmediatePropagation(); }
-  }, true);
-  addEventListener('hashchange', () => { if (location.hash !== '#/') location.replace(`${location.pathname}${location.search}#/`); });
-  if (location.hash !== '#/') history.replaceState(null, '', `${location.pathname}${location.search}#/`);
+  for (const type of ['hashchange', 'popstate']) addEventListener(type, () => { if (!isHome(location.href)) restoreHome(); });
+  if (!isHome(location.href)) nativeReplaceState(null, '', home.href);
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { runInNewContext } from 'node:vm';
 import { generateKeyPair, exportJWK, createLocalJWKSet, SignJWT } from 'jose';
 import { requireShellAtlasAccess } from '../src/integrations/access.js';
 import { embedContext, renderEmbed, rewriteEmbedStyles, resolveEmbedTheme, LUMINA_THEME, handleShellAtlas } from '../src/integrations/shellatlas.js';
@@ -9,11 +10,123 @@ import { Miniflare } from 'miniflare';
 import { initDatabase } from '../src/database/schema.js';
 import { clearServersListCache } from '../src/utils/cache.js';
 import { clearSiteSettingsCache, clearAppearanceSettingsCache } from '../src/utils/settings.js';
+import { embedBootstrap } from '../src/integrations/embedBootstrap.js';
 
 const a = '11111111-1111-4111-8111-111111111111';
 const b = '22222222-2222-4222-8222-222222222222';
 const env = { SHELLATLAS_ACCESS_TEAM_DOMAIN: 'https://test.cloudflareaccess.com', SHELLATLAS_ACCESS_AUD: 'application-a', SHELLATLAS_ACCESS_CLIENT_ID: 'shellatlas.access' };
 const JUNIMO_THEME = 'https://github.com/huilang-me/cfsm-junimo/tree/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+
+// Exercise the serialized browser script with DOM/events and History as its
+// boundaries. Theme controls are ordinary elements, not framework internals.
+function embedBrowser(mode) {
+  class Element {
+    constructor(tag, text = '', attributes = {}) { this.tagName = tag.toUpperCase(); this.textContent = text; this.attributes = new Map(Object.entries(attributes)); this.children = []; this.isConnected = true; }
+    getAttribute(name) { return this.attributes.get(name) ?? null; }
+    setAttribute(name, value) { this.attributes.set(name, value); }
+    removeAttribute(name) { this.attributes.delete(name); }
+    hasAttribute(name) { return this.attributes.has(name); }
+    appendChild(child) { child.parentElement = this; this.children.push(child); return child; }
+    getBoundingClientRect() { return { width: 600, height: 500 }; }
+    matches(selector) {
+      return selector.split(',').some(part => {
+        const match = part.match(/^(\w+)?(?:\[([\w-]+)(?:="([^"]+)")?\])?$/);
+        return match && (!match[1] || this.tagName === match[1].toUpperCase()) && (!match[2] || this.hasAttribute(match[2]) && (match[3] === undefined || this.getAttribute(match[2]) === match[3]));
+      });
+    }
+    closest(selector) { for (let node = this; node; node = node.parentElement) if (node.matches(selector)) return node; return null; }
+    contains(element) { for (let node = element; node; node = node.parentElement) if (node === this) return true; return false; }
+    querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); }
+  }
+  const events = new Map();
+  const timers = [];
+  const listen = (type, handler) => { if (!events.has(type)) events.set(type, []); events.get(type).push(handler); };
+  const root = new Element('html'); root.dataset = {};
+  const body = root.appendChild(new Element('body'));
+  const card = body.appendChild(new Element('article'));
+  const title = card.appendChild(new Element('button', '测试节点'));
+  const icon = title.appendChild(new Element('svg', '', { 'aria-hidden': 'true' }));
+  const detail = card.appendChild(new Element('button', '翻页 ↗'));
+  const line = card.appendChild(new Element('button', '切换线路'));
+  const anchor = card.appendChild(new Element('a', '详情', { href: '#/server/node-1' }));
+  const document = {
+    documentElement: root, body, head: new Element('head'), readyState: 'loading',
+    createElement: tag => new Element(tag), addEventListener: listen,
+    querySelectorAll: selector => selector === '.server-card' ? [card] : root.querySelectorAll(selector),
+  };
+  let reloads = 0;
+  const location = new URL('https://atlas.example/api/v1/servers/server-1/monitor/embed/?parentOrigin=https%3A%2F%2Fatlas.example#/');
+  location.reload = () => { reloads++; };
+  const historyCalls = [];
+  const history = { state: null };
+  for (const method of ['pushState', 'replaceState']) history[method] = (data, unused, url) => { historyCalls.push({ method, url }); history.state = data; if (url != null) location.href = new URL(url, location.href).href; };
+  const originalPushState = history.pushState;
+  const window = { fetch: async () => new Response('{}'), WebSocket: class {} };
+  const messages = [];
+  runInNewContext(`(${embedBootstrap.toString()})(context)`, {
+    context: { base: '/api/v1/servers/server-1/monitor/embed/', parentOrigin: 'https://atlas.example', serverId: 'server-1', nodeId: 'node-1', nodeName: '测试节点', theme: 'generic', mode },
+    window, document, location, history, URL, Request, parent: { postMessage: value => messages.push(value) },
+    addEventListener: listen, setTimeout: (callback, delay) => timers.push({ callback, delay }),
+    MutationObserver: class { constructor(callback) { this.callback = callback; } observe() {} disconnect() {} },
+    ResizeObserver: class { observe() {} disconnect() {} },
+  });
+  for (const handler of events.get('DOMContentLoaded') || []) handler();
+  const dispatch = (type, target, key) => {
+    const event = { type, target, key, prevented: false, stopped: false, preventDefault() { this.prevented = true; }, stopImmediatePropagation() { this.stopped = true; } };
+    for (const handler of events.get(type) || []) { handler(event); if (event.stopped) break; }
+    return event;
+  };
+  return { root, body, card, title, icon, detail, line, anchor, location, history, historyCalls, timers, dispatch, originalPushState, get reloads() { return reloads; } };
+}
+
+test('single-card embeds hide detail actions and block button, icon and keyboard navigation without blocking metric controls', () => {
+  const browser = embedBrowser();
+  assert.equal(browser.detail.getAttribute('data-embed-navigation'), 'action');
+  assert.equal(browser.title.getAttribute('data-embed-navigation'), 'title');
+  assert.equal(browser.title.getAttribute('aria-disabled'), 'true');
+  assert.equal(browser.anchor.getAttribute('tabindex'), '-1');
+  assert.equal(browser.line.hasAttribute('data-embed-navigation'), false);
+  for (const control of [browser.detail, browser.title, browser.icon, browser.anchor]) {
+    assert.equal(browser.dispatch('click', control).prevented, true);
+    assert.equal(browser.dispatch('keydown', control, 'Enter').stopped, true);
+  }
+  assert.equal(browser.dispatch('auxclick', browser.anchor).prevented, true);
+  assert.equal(browser.dispatch('keydown', browser.detail, ' ').prevented, true);
+  assert.equal(browser.dispatch('keydown', browser.title, 'ArrowDown').prevented, false);
+  assert.equal(browser.dispatch('click', browser.line).prevented, false);
+  assert.equal(browser.dispatch('keydown', browser.line, 'Enter').prevented, false);
+});
+
+test('single-card embeds recover safely from SPA history, hash and back-button detail routes', () => {
+  for (const method of ['pushState', 'replaceState']) {
+    const browser = embedBrowser();
+    browser.history[method]({ page: 1 }, '', '#/?filter=online');
+    assert.equal(browser.historyCalls.at(-1).method, method);
+    browser.history[method]({ page: 2 }, '', '#/server/node-1?apiIndex=0');
+    assert.equal(browser.location.hash, '#/');
+    assert.equal(browser.root.hasAttribute('data-embed-ready'), false);
+    assert.ok(browser.body.children.some(child => child.id === 'embed-status' && child.textContent === '正在返回实时监控…' && !child.hidden));
+    for (const timer of browser.timers.filter(timer => timer.delay === 0)) timer.callback();
+    assert.equal(browser.reloads, 1);
+  }
+  for (const type of ['hashchange', 'popstate']) {
+    const browser = embedBrowser();
+    browser.location.hash = '/server/node-1';
+    browser.dispatch(type);
+    assert.equal(browser.location.hash, '#/');
+    assert.equal(browser.timers.filter(timer => timer.delay === 0).length, 1);
+  }
+});
+
+test('full-dashboard embeds keep theme detail buttons and SPA navigation available', () => {
+  const browser = embedBrowser('dashboard');
+  assert.equal(browser.history.pushState, browser.originalPushState);
+  assert.equal(browser.detail.hasAttribute('data-embed-navigation'), false);
+  assert.equal(browser.dispatch('click', browser.detail).prevented, false);
+  browser.history.pushState(null, '', '#/server/node-1');
+  assert.equal(browser.location.hash, '#/server/node-1');
+  assert.equal(browser.timers.length, 0);
+});
 
 test('embed follows the configured theme by default and retains explicit overrides', () => {
   assert.deepEqual(resolveEmbedTheme({ theme_url: JUNIMO_THEME }), { theme: 'junimo', themeUrl: JUNIMO_THEME });
