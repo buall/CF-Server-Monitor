@@ -156,7 +156,9 @@ test('authenticated integration provisions idempotently and returns only one D1 
       clearAppearanceSettingsCache();
     };
     await selectTheme(LUMINA_THEME);
-    const page = await call(`nodes/${a}/embed/`,'GET',null,{'X-ShellAtlas-Embed-Base':`/api/v1/servers/${b}/monitor/embed/`,'X-ShellAtlas-Parent-Origin':'https://atlas.example'});
+    const legacyPage = await call(`nodes/${a}/embed/`,'GET',null,{'X-ShellAtlas-Embed-Base':`/api/v1/servers/${b}/monitor/embed/`,'X-ShellAtlas-Parent-Origin':'https://atlas.example'});
+    assert.ok((await legacyPage.text()).includes(`src="/api/v1/servers/${b}/monitor/embed/assets/original.js"`), 'Older Managers must keep their supported unversioned paths');
+    const page = await call(`nodes/${a}/embed/`,'GET',null,{'X-ShellAtlas-Embed-Base':`/api/v1/servers/${b}/monitor/embed/`,'X-ShellAtlas-Parent-Origin':'https://atlas.example','X-ShellAtlas-Theme-Assets':'versioned-v1'});
     assert.equal(page.status,200);
     assert.equal(page.headers.get('X-Frame-Options'),null);
     assert.ok(page.headers.get('Content-Security-Policy').includes("frame-ancestors 'self' https://atlas.example"));
@@ -164,7 +166,7 @@ test('authenticated integration provisions idempotently and returns only one D1 
     assert.ok(luminaHtml.includes(`/api/v1/servers/${b}/monitor/embed/themes/`));
     assert.ok(luminaHtml.includes('/assets/original.js'));
     await selectTheme(JUNIMO_THEME);
-    const embedHeaders = { 'X-ShellAtlas-Embed-Base': `/api/v1/servers/${b}/monitor/embed/`, 'X-ShellAtlas-Parent-Origin': 'https://atlas.example' };
+    const embedHeaders = { 'X-ShellAtlas-Embed-Base': `/api/v1/servers/${b}/monitor/embed/`, 'X-ShellAtlas-Parent-Origin': 'https://atlas.example', 'X-ShellAtlas-Theme-Assets':'versioned-v1' };
     // The old document must keep its own release after the configured theme changes.
     const oldScript = luminaHtml.match(/src="([^"]*\/assets\/original\.js)"/)[1];
     const oldResource = pathname => call(`nodes/${a}/embed/${pathname.slice(embedHeaders['X-ShellAtlas-Embed-Base'].length)}`, 'GET', null, embedHeaders);
@@ -207,9 +209,11 @@ test('authenticated integration provisions idempotently and returns only one D1 
     assert.equal(missing.status, 502);
     assert.equal((await missing.json()).code, 'CFSM_THEME_LOAD_FAILED');
     await selectTheme(JUNIMO_THEME);
-    const dashboard = (suffix = '', method = 'GET') => handleShellAtlas(new Request(`https://monitor.example/integrations/shellatlas/dashboard/embed/${suffix}`, {
-      method, headers: {'Cf-Access-Jwt-Assertion': jwt, 'X-ShellAtlas-Embed-Base':'/api/v1/monitor/dashboard/embed/', 'X-ShellAtlas-Parent-Origin':'https://atlas.example'}
+    const dashboard = (suffix = '', method = 'GET', versioned = true) => handleShellAtlas(new Request(`https://monitor.example/integrations/shellatlas/dashboard/embed/${suffix}`, {
+      method, headers: {'Cf-Access-Jwt-Assertion': jwt, 'X-ShellAtlas-Embed-Base':'/api/v1/monitor/dashboard/embed/', 'X-ShellAtlas-Parent-Origin':'https://atlas.example', ...(versioned ? {'X-ShellAtlas-Theme-Assets':'versioned-v1'} : {})}
     }), runtime, {});
+    const legacyDashboard = await dashboard('', 'GET', false);
+    assert.ok((await legacyDashboard.text()).includes('src="/api/v1/monitor/dashboard/embed/assets/junimo.js"'));
     const fullPage = await dashboard();
     assert.equal(fullPage.status, 200);
     const fullHtml = await fullPage.text();

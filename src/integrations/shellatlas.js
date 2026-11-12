@@ -231,7 +231,7 @@ export async function handleShellAtlas(request, env, ctx) {
     const embedEnv = { ...env, API_BASE: '' };
     if (suffix === 'embed/' || suffix === 'embed') {
       const context = { ...embedContext(request, nodeId), theme, nodeName: server.name };
-      context.assetBase = assetBase(context, themeUrl);
+      context.assetBase = request.headers.get('X-ShellAtlas-Theme-Assets') === 'versioned-v1' ? assetBase(context, themeUrl) : context.base;
       const response = await serveFrontend(new Request(`${url.origin}/`), embedEnv, embedSettings);
       if (!response.ok) {
         const error = new IntegrationError('当前主题发布文件加载失败，请在 CFSM 后台检查主题版本或重新选择主题', 502);
@@ -280,7 +280,7 @@ async function handleDashboard(request, env, suffix) {
   const context = { ...embedContext(request, 'dashboard'), base: request.headers.get('X-ShellAtlas-Embed-Base') || '/integrations/shellatlas/dashboard/embed/', mode: 'dashboard', siteUrl: url.origin };
   const resource = embedAsset(suffix);
   const { themeUrl } = resource?.theme || resolveEmbedTheme(settings, env);
-  context.assetBase = assetBase(context, themeUrl);
+  context.assetBase = request.headers.get('X-ShellAtlas-Theme-Assets') === 'versioned-v1' ? assetBase(context, themeUrl) : context.base;
   const embedSettings = { ...settings, theme_url: themeUrl, custom_head: '', custom_script: '' };
   const embedEnv = { ...env, API_BASE: '' };
   if (suffix === '') {
