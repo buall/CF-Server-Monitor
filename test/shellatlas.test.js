@@ -30,6 +30,7 @@ function embedBrowser(mode) {
     getBoundingClientRect() { return { width: 600, height: 500 }; }
     matches(selector) {
       return selector.split(',').some(part => {
+        if (part.startsWith('.')) return (this.getAttribute('class') || '').split(/\s+/).includes(part.slice(1));
         const match = part.match(/^(\w+)?(?:\[([\w-]+)(?:="([^"]+)")?\])?$/);
         return match && (!match[1] || this.tagName === match[1].toUpperCase()) && (!match[2] || this.hasAttribute(match[2]) && (match[3] === undefined || this.getAttribute(match[2]) === match[3]));
       });
@@ -37,6 +38,7 @@ function embedBrowser(mode) {
     closest(selector) { for (let node = this; node; node = node.parentElement) if (node.matches(selector)) return node; return null; }
     contains(element) { for (let node = element; node; node = node.parentElement) if (node === this) return true; return false; }
     querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); }
+    querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
   }
   const events = new Map();
   const timers = [];
@@ -49,6 +51,10 @@ function embedBrowser(mode) {
   const detail = card.appendChild(new Element('button', '翻页 ↗'));
   const line = card.appendChild(new Element('button', '切换线路'));
   const anchor = card.appendChild(new Element('a', '详情', { href: '#/server/node-1' }));
+  const os = card.appendChild(new Element('span', '', { class: 'server-card-detail-link', role: 'img', title: 'Ubuntu · 点击查看详情', 'aria-label': '测试节点，系统 Ubuntu' }));
+  const osLogo = os.appendChild(new Element('img', '', { alt: 'Ubuntu', title: 'Ubuntu', src: '/os-icons/os-ubuntu.svg' }));
+  const detailIcon = card.appendChild(new Element('span', '', { class: 'server-card-detail-link', title: '查看详情' }));
+  detailIcon.appendChild(new Element('svg', '', { 'aria-hidden': 'true' }));
   const document = {
     documentElement: root, body, head: new Element('head'), readyState: 'loading',
     createElement: tag => new Element(tag), addEventListener: listen,
@@ -76,7 +82,7 @@ function embedBrowser(mode) {
     for (const handler of events.get(type) || []) { handler(event); if (event.stopped) break; }
     return event;
   };
-  return { root, body, card, title, icon, detail, line, anchor, location, history, historyCalls, timers, dispatch, originalPushState, get reloads() { return reloads; } };
+  return { root, body, card, title, icon, detail, line, anchor, os, osLogo, detailIcon, document, location, history, historyCalls, timers, dispatch, originalPushState, get reloads() { return reloads; } };
 }
 
 test('single-card embeds hide detail actions and block button, icon and keyboard navigation without blocking metric controls', () => {
@@ -95,6 +101,22 @@ test('single-card embeds hide detail actions and block button, icon and keyboard
   assert.equal(browser.dispatch('keydown', browser.title, 'ArrowDown').prevented, false);
   assert.equal(browser.dispatch('click', browser.line).prevented, false);
   assert.equal(browser.dispatch('keydown', browser.line, 'Enter').prevented, false);
+});
+
+test('single-card embeds retain OS logos inside detail controls while blocking their navigation', () => {
+  const browser = embedBrowser();
+  assert.equal(browser.os.getAttribute('data-embed-navigation'), 'icon');
+  assert.equal(browser.os.getAttribute('title'), 'Ubuntu');
+  assert.equal(browser.os.getAttribute('aria-label'), '测试节点，系统 Ubuntu');
+  assert.equal(browser.osLogo.getAttribute('alt'), 'Ubuntu');
+  assert.ok(browser.osLogo.getAttribute('src').endsWith('/monitor/embed/os-icons/os-ubuntu.svg'));
+  assert.equal(browser.detailIcon.getAttribute('data-embed-navigation'), 'action');
+  for (const control of [browser.os, browser.osLogo, browser.detailIcon]) {
+    for (const type of ['click', 'auxclick']) assert.equal(browser.dispatch(type, control).prevented, true);
+    assert.equal(browser.dispatch('keydown', control, 'Enter').stopped, true);
+  }
+  assert.equal(browser.location.hash, '#/');
+  assert.equal(browser.dispatch('click', browser.line).prevented, false);
 });
 
 test('single-card embeds recover safely from SPA history, hash and back-button detail routes', () => {
@@ -122,6 +144,9 @@ test('full-dashboard embeds keep theme detail buttons and SPA navigation availab
   const browser = embedBrowser('dashboard');
   assert.equal(browser.history.pushState, browser.originalPushState);
   assert.equal(browser.detail.hasAttribute('data-embed-navigation'), false);
+  assert.equal(browser.os.hasAttribute('data-embed-navigation'), false);
+  assert.equal(browser.os.getAttribute('title'), 'Ubuntu · 点击查看详情');
+  assert.equal(browser.dispatch('click', browser.osLogo).prevented, false);
   assert.equal(browser.dispatch('click', browser.detail).prevented, false);
   browser.history.pushState(null, '', '#/server/node-1');
   assert.equal(browser.location.hash, '#/server/node-1');

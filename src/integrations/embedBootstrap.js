@@ -132,11 +132,15 @@ export function embedBootstrap(context) {
     if (url != null && !isHome(url)) return restoreHome();
     return nativeReplaceState(data, unused, url);
   };
+  const navigationControls = 'a,button,[role="button"],[role="link"],.server-card-detail-link';
   const navigationKind = element => {
     if (!element) return '';
     if (element === card) {
       return element.matches('a,button,[role="button"],[role="link"]') ? 'card' : '';
     }
+    // Some themes use their detail-link wrapper to display the OS logo.
+    // Keep that information visible while disabling its detail navigation.
+    if (element.matches('.server-card-detail-link') && element.querySelector('img')) return 'icon';
     const labels = ['aria-label', 'title'].map(name => element.getAttribute(name) || '');
     labels.push(element.textContent || '');
     const title = labels.some(label => context.nodeName && label.replace(/[↗↪→➜›»]/g, '').trim() === context.nodeName);
@@ -146,17 +150,21 @@ export function embedBootstrap(context) {
     return labels.some(label => /详情|详细|翻页|历史曲线|查看(?:节点|服务器|历史)|进入(?:节点|服务器)|\b(?:details?|history|view (?:node|server)|open (?:node|server))\b|^[\s↗↪→➜›»]+$/i.test(label)) ? 'action' : '';
   };
   const markNavigation = () => {
-    for (const element of [card, ...card.querySelectorAll('a[href],button,[role="button"],[role="link"]')]) {
+    for (const element of [card, ...card.querySelectorAll(navigationControls)]) {
       const kind = navigationKind(element);
       if (!kind) continue;
       element.setAttribute('data-embed-navigation', kind);
       element.setAttribute('tabindex', '-1');
-      if (kind !== 'card') element.setAttribute('aria-disabled', 'true');
+      if (kind === 'icon') {
+        const image = element.querySelector('img');
+        const label = image.getAttribute('alt') || image.getAttribute('title');
+        if (label) element.setAttribute('title', label);
+      } else if (kind !== 'card') element.setAttribute('aria-disabled', 'true');
     }
   };
   const blockNavigation = event => {
     if (event.type === 'keydown' && !['Enter', ' ', 'Spacebar'].includes(event.key)) return;
-    const control = event.target?.closest?.('a,button,[role="button"],[role="link"]');
+    const control = event.target?.closest?.(navigationControls);
     if (!control || !card?.contains(control) || !navigationKind(control)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
@@ -205,9 +213,8 @@ export function embedBootstrap(context) {
     [data-embed-path]>:not([data-embed-path]):not([data-embed-card]):not(#embed-status){display:none!important}
     [data-embed-card]{width:100%!important;max-width:none!important;box-sizing:border-box!important;margin:0!important;visibility:visible;box-shadow:none!important}
     [data-embed-navigation="action"]{display:none!important}
-    [data-embed-navigation="title"],[data-embed-navigation="card"]{cursor:default!important}
+    [data-embed-navigation="title"],[data-embed-navigation="card"],[data-embed-navigation="icon"]{cursor:default!important}
     [data-embed-navigation="title"] svg[aria-hidden="true"]{display:none!important}
-    .server-card-detail-link{display:none!important}
     #embed-status{padding:16px;font:14px system-ui;color:#64748b}`;
   document.head.appendChild(style);
   const postHeight = () => {
