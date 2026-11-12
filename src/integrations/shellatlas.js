@@ -49,6 +49,61 @@ export function resolveEmbedTheme(settings, env = {}) {
   return { theme, themeUrl };
 }
 
+function themeRevision(themeUrl) {
+  return themeUrl ? btoa(themeUrl).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '') : 'builtin';
+}
+
+function assetBase(context, themeUrl) {
+  return `${context.base}themes/${themeRevision(themeUrl)}/`;
+}
+
+// This is a public release identifier, not an authentication token. Assets still
+// pass through Access and the Manager's node/dashboard authorization checks.
+function embedAsset(suffix) {
+  let revision = '';
+  let theme = null;
+  let path = suffix;
+  if (suffix.startsWith('themes/')) {
+    const parts = suffix.split('/');
+    revision = parts[1] || '';
+    path = parts.slice(2).join('/');
+    if (!/^[A-Za-z0-9_-]{1,1024}$/.test(revision)) throw new IntegrationError('Invalid theme revision', 404);
+    if (revision === 'builtin') theme = { theme: 'builtin', themeUrl: '' };
+    else {
+      try {
+        const encoded = revision.replace(/-/g, '+').replace(/_/g, '/');
+        const themeUrl = atob(encoded.padEnd(Math.ceil(encoded.length / 4) * 4, '='));
+        theme = resolveEmbedTheme({ theme_url: themeUrl });
+        if (!theme.themeUrl || themeRevision(theme.themeUrl) !== revision) throw new Error('Invalid revision');
+      } catch {
+        throw new IntegrationError('Invalid theme revision', 404);
+      }
+    }
+  }
+  if (!/^(?:assets|static|flags|os-icons|files)\/[A-Za-z0-9_./@-]+$/.test(path) ||
+      path.split('/').some(part => part === '.' || part === '..' || !part)) return null;
+  return { path, revision, theme };
+}
+
+async function serveEmbedAsset(request, env, settings, resource, context) {
+  const assetRequest = new Request(`${new URL(request.url).origin}/${resource.path}`);
+  const response = resource.path.startsWith('assets/')
+    ? await serveFrontend(assetRequest, env, settings)
+    : await env.ASSETS.fetch(assetRequest);
+  if (!response.ok || response.headers.get('Content-Type')?.includes('text/html')) {
+    const missing = response.status === 404 || response.headers.get('Content-Type')?.includes('text/html');
+    const error = new IntegrationError(missing ? '主题资源不存在，请刷新探针面板以加载当前主题' : '主题资源加载失败，请稍后重试', missing ? 404 : 502);
+    error.code = missing ? 'CFSM_THEME_ASSET_NOT_FOUND' : 'CFSM_THEME_LOAD_FAILED';
+    throw error;
+  }
+  const headers = new Headers(response.headers);
+  headers.delete('X-CFSM-Theme-Asset');
+  headers.set('Cache-Control', 'private, no-store');
+  const base = resource.revision ? `${context.base}themes/${resource.revision}/` : context.base;
+  return new Response(headers.get('Content-Type')?.includes('text/css')
+    ? rewriteEmbedStyles(await response.text(), base) : response.body, { status: response.status, headers });
+}
+
 
 export function embedContext(request, nodeId) {
   const ownBase = `/integrations/shellatlas/nodes/${nodeId}/embed/`;
@@ -71,7 +126,7 @@ export function embedContext(request, nodeId) {
 export function renderEmbed(html, context) {
   html = html.replace(/<meta\b[^>]*name=["']apiBase["'][^>]*>/gi, '');
   html = html.replace(/\b(src|href)=(["'])(?:\.\/|\/)?((?:assets|static|flags|os-icons|files)\/)/gi,
-    (_, attr, quote, path) => `${attr}=${quote}${context.base}${path}`);
+    (_, attr, quote, path) => `${attr}=${quote}${context.assetBase || context.base}${path}`);
   const serialized = JSON.stringify(context).replace(/</g, '\\u003c');
   // Wrangler's keep-names transform adds __name calls inside this function.
   // The serialized client script needs its own helper scope, separate from Worker globals.
@@ -169,12 +224,14 @@ export async function handleShellAtlas(request, env, ctx) {
       return stub.fetch(new Request('http://internal/ws?subscribe=all', { headers }));
     }
 
-    const { theme, themeUrl } = resolveEmbedTheme(settings, env);
+    const resource = suffix.startsWith('embed/') ? embedAsset(suffix.slice('embed/'.length)) : null;
+    const { theme, themeUrl } = resource?.theme || resolveEmbedTheme(settings, env);
     const embedSettings = { ...settings, theme_url: themeUrl,
       custom_head: '', custom_script: '', custom_bg: '', custom_bg_mobile: '', favicon: '' };
     const embedEnv = { ...env, API_BASE: '' };
     if (suffix === 'embed/' || suffix === 'embed') {
       const context = { ...embedContext(request, nodeId), theme, nodeName: server.name };
+      context.assetBase = assetBase(context, themeUrl);
       const response = await serveFrontend(new Request(`${url.origin}/`), embedEnv, embedSettings);
       if (!response.ok) {
         const error = new IntegrationError('当前主题发布文件加载失败，请在 CFSM 后台检查主题版本或重新选择主题', 502);
@@ -187,22 +244,7 @@ export async function handleShellAtlas(request, env, ctx) {
       headers.set('Cache-Control', 'private, no-store');
       return new Response(renderEmbed(await response.text(), context), { headers });
     }
-    const asset = suffix.match(/^embed\/((?:assets|static|flags|os-icons|files)\/[A-Za-z0-9_./@-]+)$/);
-    if (asset && !asset[1].split('/').some(part => part === '.' || part === '..' || !part)) {
-      const assetRequest = new Request(`${url.origin}/${asset[1]}`);
-      const response = asset[1].startsWith('assets/')
-        ? await serveFrontend(assetRequest, embedEnv, embedSettings)
-        : await env.ASSETS.fetch(assetRequest);
-      const headers = new Headers(response.headers);
-      headers.delete('X-CFSM-Theme-Asset');
-      headers.set('Cache-Control', 'private, max-age=3600');
-      if (headers.get('Content-Type')?.includes('text/html')) throw new IntegrationError('Asset not found', 404);
-      if (headers.get('Content-Type')?.includes('text/css')) {
-        const context = embedContext(request, nodeId);
-        return new Response(rewriteEmbedStyles(await response.text(), context.base), { status: response.status, headers });
-      }
-      return new Response(response.body, { status: response.status, headers });
-    }
+    if (resource) return await serveEmbedAsset(request, embedEnv, embedSettings, resource, embedContext(request, nodeId));
     throw new IntegrationError('Integration route not found', 404);
   } catch (error) {
     if (error instanceof IntegrationError) return json({ error: error.message, ...(error.code ? { code: error.code } : {}) }, error.status);
@@ -236,7 +278,9 @@ async function handleDashboard(request, env, suffix) {
     return stub.fetch(new Request(target, { headers: { Upgrade: 'websocket' } }));
   }
   const context = { ...embedContext(request, 'dashboard'), base: request.headers.get('X-ShellAtlas-Embed-Base') || '/integrations/shellatlas/dashboard/embed/', mode: 'dashboard', siteUrl: url.origin };
-  const { themeUrl } = resolveEmbedTheme(settings, env);
+  const resource = embedAsset(suffix);
+  const { themeUrl } = resource?.theme || resolveEmbedTheme(settings, env);
+  context.assetBase = assetBase(context, themeUrl);
   const embedSettings = { ...settings, theme_url: themeUrl, custom_head: '', custom_script: '' };
   const embedEnv = { ...env, API_BASE: '' };
   if (suffix === '') {
@@ -255,15 +299,6 @@ async function handleDashboard(request, env, suffix) {
     headers.set('Cache-Control', 'private, no-store');
     return new Response(renderEmbed(await response.text(), context), { headers });
   }
-  const asset = suffix.match(/^((?:assets|static|flags|os-icons|files)\/[A-Za-z0-9_./@-]+)$/);
-  if (asset && !asset[1].split('/').some(part => part === '.' || part === '..' || !part)) {
-    const assetRequest = new Request(`${url.origin}/${asset[1]}`);
-    const response = asset[1].startsWith('assets/') ? await serveFrontend(assetRequest, embedEnv, embedSettings) : await env.ASSETS.fetch(assetRequest);
-    if (response.headers.get('Content-Type')?.includes('text/html')) throw new IntegrationError('Asset not found', 404);
-    const headers = new Headers(response.headers);
-    headers.delete('X-CFSM-Theme-Asset');
-    headers.set('Cache-Control', 'private, no-store');
-    return new Response(headers.get('Content-Type')?.includes('text/css') ? rewriteEmbedStyles(await response.text(), context.base) : response.body, { status: response.status, headers });
-  }
+  if (resource) return serveEmbedAsset(request, embedEnv, embedSettings, resource, context);
   throw new IntegrationError('Dashboard resource not found', 404);
 }

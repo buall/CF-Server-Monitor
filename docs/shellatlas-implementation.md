@@ -130,6 +130,12 @@ GitHub 的 Cloudflare 官方检查 `Workers Builds: cf-server-monitor` 返回 `c
 
 本地浏览器使用真实发布文件验收：Emerald、Pulse、LuminaPlus、Horizon、Junimo、Shadcn、Glassmorphism、Win2000、SAO、AnotherLuminaPlus、hahaha、CRT，均成功定位并渲染单个节点；元数据与静态资源仅使用隔离测试库。
 
+## 切换主题时固定嵌入资源版本（2026-11-12）
+
+已复现旧行为：主题 A 的 HTML 返回后将站点切换为 B，后续静态请求按 B 的配置读取 A 的文件名，导致 404，ShellAtlas 再错误转换为 409。单卡和完整面板现将静态文件放在各自 `embed/themes/{revision}/` 路径下；公开发布地址编码在版本标识中，仅接受原有合法 GitHub 完整 commit 地址。内置资源使用 `builtin` 标识。相对模块导入、预加载、CSS 字体/图片和根路径资源均沿用同一前缀，数据 API、WebSocket 和权限校验路径不变。旧式无版本静态路径继续兼容。
+
+回归测试使用真实 D1 与鉴权请求，覆盖 A→B、第三方→内置、相对模块、CSS 字体、单卡和完整面板，以及无效版本标识、非 GitHub 地址和版本路径下的数据接口拒绝。单卡的分组容器边框、圆角和阴影也已清理；卡片外投影仅在单卡嵌入模式移除，完整站点和完整面板保留原样。该修复需先更新 ShellAtlas Manager 的静态路径白名单，再发布本仓库主控代码。
+
 ## 完整首页嵌入
 
 新增 `/integrations/shellatlas/dashboard/embed/`，沿用 Access 服务身份校验。此独立入口由 ShellAtlas 管理员面板使用，保留完整主题首页、分组、卡片、只读详情/历史与实时数据，不做单卡 DOM 裁剪。前端存储仍隔离；后台入口在原站点新窗口打开。该路径只处理 GET、数据与静态白名单，不代理 admin、update 或设置修改。原单节点接口不接受此全局范围。

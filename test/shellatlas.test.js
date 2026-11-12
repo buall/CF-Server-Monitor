@@ -109,11 +109,19 @@ test('authenticated integration provisions idempotently and returns only one D1 
     globalThis.fetch = async value => {
       const url = String(value);
       if (url === `${env.SHELLATLAS_ACCESS_TEAM_DOMAIN}/cdn-cgi/access/certs`) return Response.json({keys:[jwk]});
-      if (url.includes('raw.githubusercontent.com/volcano-1025/')) return new Response('<html><head><script type="module" src="/assets/original.js"></script></head><body><div id="root"></div></body></html>');
+      if (url.includes('raw.githubusercontent.com/volcano-1025/')) {
+        if (url.endsWith('/index.html')) return new Response('<html><head><script type="module" src="/assets/original.js"></script><link rel="stylesheet" href="/assets/original.css"></head><body><div id="root"></div></body></html>');
+        if (url.endsWith('/assets/original.js')) return new Response('import "./shared.js"; export const theme = "lumina";');
+        if (url.endsWith('/assets/shared.js')) return new Response('export const shared = "lumina";');
+        if (url.endsWith('/assets/original.css')) return new Response('@font-face{src:url("/assets/fonts/lumina.woff2")}');
+        if (url.endsWith('/assets/fonts/lumina.woff2')) return new Response('lumina-font');
+        return new Response('Theme file not found', { status: 404 });
+      }
       if (url.includes('raw.githubusercontent.com/huilang-me/cfsm-junimo/')) {
-        return url.endsWith('.css')
-          ? new Response('@font-face{src:url("/assets/fonts/pixel.woff2")}')
-          : new Response('<html><head><script type="module" src="/assets/junimo.js"></script></head><body><div id="root"></div></body></html>');
+        if (url.endsWith('/index.html')) return new Response('<html><head><script type="module" src="/assets/junimo.js"></script></head><body><div id="root"></div></body></html>');
+        if (url.endsWith('/assets/junimo.js')) return new Response('export const theme = "junimo";');
+        if (url.endsWith('/assets/junimo.css')) return new Response('@font-face{src:url("/assets/fonts/pixel.woff2")}');
+        return new Response('Theme file not found', { status: 404 });
       }
       if (url.includes('raw.githubusercontent.com/finch-xu/')) return new Response('<html><head><script type="module" src="/assets/win2000.js"></script></head><body><div id="app"></div></body></html>');
       if (url.includes('raw.githubusercontent.com/missing/')) return new Response('not found', { status: 404 });
@@ -152,13 +160,39 @@ test('authenticated integration provisions idempotently and returns only one D1 
     assert.equal(page.status,200);
     assert.equal(page.headers.get('X-Frame-Options'),null);
     assert.ok(page.headers.get('Content-Security-Policy').includes("frame-ancestors 'self' https://atlas.example"));
-    assert.ok((await page.text()).includes(`/api/v1/servers/${b}/monitor/embed/assets/original.js`));
+    const luminaHtml = await page.text();
+    assert.ok(luminaHtml.includes(`/api/v1/servers/${b}/monitor/embed/themes/`));
+    assert.ok(luminaHtml.includes('/assets/original.js'));
     await selectTheme(JUNIMO_THEME);
     const embedHeaders = { 'X-ShellAtlas-Embed-Base': `/api/v1/servers/${b}/monitor/embed/`, 'X-ShellAtlas-Parent-Origin': 'https://atlas.example' };
+    // The old document must keep its own release after the configured theme changes.
+    const oldScript = luminaHtml.match(/src="([^"]*\/assets\/original\.js)"/)[1];
+    const oldResource = pathname => call(`nodes/${a}/embed/${pathname.slice(embedHeaders['X-ShellAtlas-Embed-Base'].length)}`, 'GET', null, embedHeaders);
+    const oldModule = await oldResource(oldScript);
+    assert.equal(oldModule.status, 200, 'Switching themes must not invalidate the old document modules');
+    assert.ok((await oldModule.text()).includes('theme = "lumina"'));
+    const sharedPath = new URL('./shared.js', `https://atlas.example${oldScript}`).pathname;
+    assert.ok((await (await oldResource(sharedPath)).text()).includes('shared = "lumina"'));
+    const oldStyle = luminaHtml.match(/href="([^"]*\/assets\/original\.css)"/)[1];
+    const oldCss = await oldResource(oldStyle);
+    assert.equal(oldCss.status, 200);
+    const fontPath = (await oldCss.text()).match(/url\("([^"]+)"\)/)[1];
+    assert.equal(fontPath, oldScript.replace('original.js', 'fonts/lumina.woff2'));
+    assert.equal(await (await oldResource(fontPath)).text(), 'lumina-font');
+    const revision = oldScript.slice(embedHeaders['X-ShellAtlas-Embed-Base'].length).split('/')[1];
+    const invalidRevisions = ['bad!', 'a'.repeat(1025), Buffer.from('https://evil.example/repo/tree/' + 'a'.repeat(40)).toString('base64url')];
+    for (const invalid of invalidRevisions) {
+      assert.equal((await call(`nodes/${a}/embed/themes/${invalid}/assets/original.js`, 'GET', null, embedHeaders)).status, 404);
+    }
+    assert.equal((await call(`nodes/${a}/embed/themes/${revision}/api/servers`, 'GET', null, embedHeaders)).status, 404);
+    const missingAsset = await oldResource(oldScript.replace('original.js', 'missing.js'));
+    assert.equal(missingAsset.status, 404);
+    assert.equal((await missingAsset.json()).code, 'CFSM_THEME_ASSET_NOT_FOUND');
     const junimo = await call(`nodes/${a}/embed/`, 'GET', null, embedHeaders);
     const junimoHtml = await junimo.text();
     assert.equal(junimo.status, 200);
-    assert.ok(junimoHtml.includes(`/api/v1/servers/${b}/monitor/embed/assets/junimo.js`));
+    assert.ok(junimoHtml.includes(`/api/v1/servers/${b}/monitor/embed/themes/`));
+    assert.ok(junimoHtml.includes('/assets/junimo.js'));
     assert.ok(junimoHtml.includes('"theme":"junimo"'));
     assert.ok(!junimoHtml.includes('assets/original.js'));
     const css = await call(`nodes/${a}/embed/assets/junimo.css`, 'GET', null, embedHeaders);
@@ -167,7 +201,7 @@ test('authenticated integration provisions idempotently and returns only one D1 
     await selectTheme(`https://github.com/finch-xu/CF-Server-Monitor-theme-win2000/tree/${'a'.repeat(40)}`);
     const win2000 = await call(`nodes/${a}/embed/`, 'GET', null, embedHeaders);
     assert.equal(win2000.status, 200);
-    assert.ok((await win2000.text()).includes(`/api/v1/servers/${b}/monitor/embed/assets/win2000.js`));
+    assert.ok((await win2000.text()).includes('/assets/win2000.js'));
     await selectTheme(`https://github.com/missing/theme/tree/${'a'.repeat(40)}`);
     const missing = await call(`nodes/${a}/embed/`, 'GET', null, embedHeaders);
     assert.equal(missing.status, 502);
@@ -180,9 +214,22 @@ test('authenticated integration provisions idempotently and returns only one D1 
     assert.equal(fullPage.status, 200);
     const fullHtml = await fullPage.text();
     assert.ok(fullHtml.includes('"mode":"dashboard"'));
-    assert.ok(fullHtml.includes('/api/v1/monitor/dashboard/embed/assets/junimo.js'));
+    assert.ok(fullHtml.includes('/api/v1/monitor/dashboard/embed/themes/'));
+    assert.ok(fullHtml.includes('/assets/junimo.js'));
     assert.ok(!fullHtml.includes('agent-only-secret'));
     assert.ok(fullPage.headers.get('Content-Security-Policy').includes('frame-ancestors'));
+    const dashboardScript = fullHtml.match(/src="([^"]*\/assets\/junimo\.js)"/)[1];
+    const dashboardResource = dashboardScript.slice('/api/v1/monitor/dashboard/embed/'.length);
+    for (const themeUrl of [LUMINA_THEME, '']) {
+      await selectTheme(themeUrl);
+      const previousModule = await dashboard(dashboardResource);
+      assert.equal(previousModule.status, 200, 'Dashboard assets must also remain on their original theme release');
+      assert.ok((await previousModule.text()).includes('theme = "junimo"'));
+      const previousNodeModule = await oldResource(oldScript);
+      assert.equal(previousNodeModule.status, 200);
+      assert.ok((await previousNodeModule.text()).includes('theme = "lumina"'));
+    }
+    await selectTheme(JUNIMO_THEME);
     const dashboardNodes = await (await dashboard('api/servers')).json();
     assert.equal(dashboardNodes.servers.length, 1);
     assert.equal(dashboardNodes.servers[0].id, b);

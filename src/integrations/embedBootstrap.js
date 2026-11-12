@@ -1,6 +1,7 @@
 // Serialized into embed HTML before the untouched theme modules run.
 export function embedBootstrap(context) {
   const base = context.base;
+  const assetBase = context.assetBase || base;
   const dashboard = context.mode === 'dashboard';
   let card = null;
   const cardInset = context.theme === 'junimo' ? 8 : context.theme === 'generic' ? 12 : 0;
@@ -10,6 +11,8 @@ export function embedBootstrap(context) {
     const url = new URL(String(value), location.href);
     if (url.host === location.host && /^\/api\//.test(url.pathname)) {
       url.pathname = `${base}${url.pathname.slice(1)}`;
+    } else if (url.host === location.host && /^\/(assets|static|flags|os-icons|files)\//.test(url.pathname)) {
+      url.pathname = `${assetBase}${url.pathname.slice(1)}`;
     }
     return url.toString();
   };
@@ -20,7 +23,7 @@ export function embedBootstrap(context) {
       let url;
       try { url = new URL(raw, location.href); } catch { continue; }
       if (url.origin === location.origin && /^\/(assets|static|flags|os-icons|files)\//.test(url.pathname)) {
-        url.pathname = `${base}${url.pathname.slice(1)}`;
+        url.pathname = `${assetBase}${url.pathname.slice(1)}`;
         element.setAttribute(attribute, url.toString());
       }
     }
@@ -134,9 +137,9 @@ export function embedBootstrap(context) {
   style.textContent = `html,body{margin:0!important;background:transparent!important}
     html:not([data-embed-ready]) body>:not(#embed-status){visibility:hidden}
     #app,#root{padding:${cardInset}px!important;box-sizing:border-box}
-    [data-embed-path]{display:block!important;min-height:0!important;height:auto!important;max-width:none!important;padding:0!important;margin:0!important;grid-template-columns:1fr!important;gap:0!important}
+    [data-embed-path]{display:block!important;min-height:0!important;height:auto!important;max-width:none!important;padding:0!important;margin:0!important;grid-template-columns:1fr!important;gap:0!important;border:0!important;border-radius:0!important;box-shadow:none!important;background:transparent!important}
     [data-embed-path]>:not([data-embed-path]):not([data-embed-card]):not(#embed-status){display:none!important}
-    [data-embed-card]{width:100%!important;max-width:none!important;box-sizing:border-box!important;margin:0!important;visibility:visible}
+    [data-embed-card]{width:100%!important;max-width:none!important;box-sizing:border-box!important;margin:0!important;visibility:visible;box-shadow:none!important}
     .server-card-detail-link{display:none!important}
     #embed-status{padding:16px;font:14px system-ui;color:#64748b}`;
   document.head.appendChild(style);
