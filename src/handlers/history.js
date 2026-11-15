@@ -1,7 +1,7 @@
 import { getMetricsHistory } from '../database/schema.js';
 import { getServerDetail, getMetricsHistoryCache, setMetricsHistoryCache, getCacheDuration } from '../utils/cache.js';
 import { loadSiteSettings, normalizeLongHistoryPoints, debug } from '../utils/settings.js';
-import { checkAuth, simpleAuthResponse } from '../middleware/auth.js';
+import { checkAuth, hasAppPasswordAccess, simpleAuthResponse } from '../middleware/auth.js';
 import { createSuccessResponse, createUnauthorizedResponse, createBadRequestResponse, createNotFoundResponse } from '../utils/errors.js';
 import { omitNullLossProbeFields } from './dashboard.js';
 
@@ -17,16 +17,18 @@ export async function fetchHistoryData(env, request, id, hours, columns, sys = n
     sys = await loadSiteSettings(env.DB);
   }
   const isLoggedIn = trustedRead || await checkAuth(request, env, sys);
+  // Preserve upstream App-password access after extracting the shared history handler.
+  const canViewPrivate = isLoggedIn || hasAppPasswordAccess(request, sys);
   
-  if (sys.is_public !== 'true' && !isLoggedIn) {
+  if (sys.is_public !== 'true' && !canViewPrivate) {
     return simpleAuthResponse();
   }
   
-  if (hours > 24 && !isLoggedIn) {
+  if (hours > 24 && !canViewPrivate) {
     return createUnauthorizedResponse();
   }
   
-  const server = await getServerDetail(env.DB, id, isLoggedIn);
+  const server = await getServerDetail(env.DB, id, canViewPrivate);
   if (!server) return createNotFoundResponse();
   
   // 最多查询7天数据

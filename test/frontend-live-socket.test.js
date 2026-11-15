@@ -35,9 +35,11 @@ class FakeWebSocket {
 
 test('frontend WebSocket closes at its lifetime limit without reconnecting', async () => {
   const vite = await createServer({
+    // Load this utility without invoking the development HTTPS certificate plugin.
+    configFile: false,
     appType: 'custom',
     logLevel: 'silent',
-    server: { middlewareMode: true }
+    server: { middlewareMode: true, hmr: false }
   })
   const { createLiveSocket, normalizeLiveSocketTimeoutMinutes } = await vite.ssrLoadModule('/src/frontend/utils/api.js')
   const originalWindow = globalThis.window

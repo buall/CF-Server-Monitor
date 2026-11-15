@@ -1,4 +1,4 @@
-import { checkAuth, simpleAuthResponse } from '../middleware/auth.js';
+import { checkAuth, hasAppPasswordAccess, simpleAuthResponse } from '../middleware/auth.js';
 import { getDashboardLatencyHistory, getLatestMetrics, getLatestMetricsForAllServers } from '../database/schema.js';
 import { getAllServers, getServerDetail } from '../utils/cache.js';
 import { mergeMetricsIntoServer, coerceNumericMetricFields } from '../utils/metrics.js';
@@ -180,8 +180,10 @@ async function getRealtimeStateForServers(env, serverIds) {
 
 export async function handleServerAPI(request, env, sys, trustedRead = false) {
   const isLoggedIn = trustedRead || await checkAuth(request, env, sys);
+  // App passwords grant read access only; integration trust still comes from verified Access identity.
+  const canViewPrivate = isLoggedIn || hasAppPasswordAccess(request, sys);
   
-  if (sys.is_public !== 'true' && !isLoggedIn) {
+  if (sys.is_public !== 'true' && !canViewPrivate) {
     return simpleAuthResponse();
   }
   markFrontendRealtimeActive();
@@ -191,7 +193,7 @@ export async function handleServerAPI(request, env, sys, trustedRead = false) {
   
   if (!id) return createBadRequestResponse('Missing ID');
   
-  const server = await getServerDetail(env.DB, id, isLoggedIn);
+  const server = await getServerDetail(env.DB, id, canViewPrivate);
   if (!server) return createNotFoundResponse('Server not found');
   
   const [latestMetrics, realtimeState] = await Promise.all([
@@ -209,16 +211,17 @@ export async function handleServerAPI(request, env, sys, trustedRead = false) {
 
 export async function handleServersAPI(request, env, sys) {
   const isLoggedIn = await checkAuth(request, env, sys);
+  const canViewPrivate = isLoggedIn || hasAppPasswordAccess(request, sys);
   
-  if (sys.is_public !== 'true' && !isLoggedIn) {
+  if (sys.is_public !== 'true' && !canViewPrivate) {
     return simpleAuthResponse();
   }
   markFrontendRealtimeActive();
   
-  return buildDashboardResponse(env, sys, null, isLoggedIn);
+  return buildDashboardResponse(env, sys, null, canViewPrivate);
 }
 
-// Only called after the integration route verifies Cloudflare service identity.
+// Callers authorize the request before selecting the dashboard scope.
 export async function buildDashboardResponse(env, sys, serverId = null, includeHidden = false) {
   const selected = serverId ? await getServerDetail(env.DB, serverId, true) : null;
   if (serverId && !selected) return createNotFoundResponse('Server not found');

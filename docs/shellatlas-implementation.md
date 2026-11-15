@@ -1,5 +1,7 @@
 # ShellAtlas 监控接入：实施与运行记录
 
+2026-11-15 更新：已合并官方 `2.8.8 Beta1`，基线、冲突处理和验证结果见文末“官方版本合并”记录。
+
 更新时间：2026-11-11。**CFSM 已通过 Workers Builds 部署到 `p.ecume.de`；ShellAtlas 接入代码与本地实时链路已验收。真实 Service Token 联调及真实服务器安装仍待验收。**
 
 ## 已实现
@@ -149,3 +151,24 @@ AnotherLuminaPlus 将操作系统图标放在 `.server-card-detail-link` 内，�
 新增 `/integrations/shellatlas/dashboard/embed/`，沿用 Access 服务身份校验。此独立入口由 ShellAtlas 管理员面板使用，保留完整主题首页、分组、卡片、只读详情/历史与实时数据，不做单卡 DOM 裁剪。前端存储仍隔离；后台入口在原站点新窗口打开。该路径只处理 GET、数据与静态白名单，不代理 admin、update 或设置修改。原单节点接口不接受此全局范围。
 
 Manager 侧每次请求检查有效管理员会话，并在 WebSocket 存续期间复核角色。详情/历史复用原逻辑，公共接口仍按原认证规则运行；仅经 Access 验证的集成入口使用显式只读服务上下文。
+
+## 官方版本合并（2026-11-15）
+
+从定制版 `d57785d`（主控 `2.8.7 Beta7`）合并官方 `upstream/main` 的 `1be24f0eabdcc2d06c215c45258382b02e438b49`。包含自上一官方基线 `612027c` 之后的 4 个提交：2.8.7 正式版、登录 `cfsm_ua` Cookie、App 访问口令及其登录 Turnstile 适配。当前实际主控版本由 `version.json.workers` 和 `src/utils/config.js` 共同标记为 **2.8.8 Beta1**；`package.json` / lockfile 的包版本沿用官方 **2.8.7**，不把 npm 包版本当作运行版本。
+
+冲突处理：
+
+- `package.json` 同时保留官方 App 口令测试、既有 ShellAtlas 测试和本轮历史权限测试；保留 `jose` 与隔离联调入口。
+- `src/handlers/dashboard.js` 保留单节点查询和完整面板的受信任只读调用，同时将官方 App 口令可见范围传入普通站点列表/详情。
+- `src/index.js` 保留集成路由与已抽出的 `src/handlers/history.js`，将官方历史查询的 App 口令判断移入共享模块，继续在读缓存之前检查私有站点、隐藏节点及超过 24 小时历史的权限。
+
+App 口令是上游新增的独立可选功能，未配置时默认关闭。ShellAtlas 集成仍校验 Cloudflare Access 服务身份，App 口令不能替代 Service Token。单卡、完整面板、版本化主题资源和 DO 的节点授权限制保持现有实现；第三方主题与 Agent 文件没有定制改动。官方 `version.json.agent` 更新为 **1.1.3**，仅代表官方版本信息，不会自动重装或升级已运行的 Agent，ShellAtlas 的安装版本配置也未修改。
+
+验证结果：
+
+- `npm run test:all`：主测试 **213/213**，Agent 配置测试通过，历史查询 **6/6**。
+- 新增 `test/history-access.test.js`，实际调用共享历史处理器，覆盖公开/私有站点、隐藏节点、长历史、缓存前鉴权、受信任完整面板调用及 App 口令不能访问集成入口。
+- `npm run build:frontend` 与 `wrangler deploy --dry-run` 均成功。既有前端 WebSocket 单元测试改为不加载开发 HTTPS 插件，避免测试尝试生成或安装本机证书；生产 Vite 配置未修改。
+- 与官方逐文件比较，后台前端、认证中间件、设置模块及普通后台处理器均保持官方文件；与合并前比较，集成模块、DO 授权实现、主题加载器、`public/`、`wrangler.toml` 和备用部署工作流保持不变。
+
+发布继续使用 `buall/CF-Server-Monitor` 的 `main` → Cloudflare Workers Builds → `cf-server-monitor`。沿用 `keep_vars = true`、原 D1/DO 绑定、域名和 Access 配置；GitHub Actions 仍仅手动触发。发布是否完成以该合并提交的 `Workers Builds: cf-server-monitor` 检查为准，构建/打包检查不代替线上 Access 凭据与真实服务器验收。

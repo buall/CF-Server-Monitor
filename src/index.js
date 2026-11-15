@@ -9,7 +9,7 @@ import { handleServerAPI, handleServersAPI } from './handlers/dashboard.js';
 import { handleTheme } from './handlers/theme.js';
 import { isValidThemeOptions, loadSettings, loadSiteSettings, loadAppearanceOptions, normalizeFrontendWsTimeoutMinutes, normalizeLongHistoryPoints, saveThemeOptions, setDebug, debug } from './utils/settings.js';
 import { fetchHistoryData } from './handlers/history.js';
-import { checkAuth, simpleAuthResponse } from './middleware/auth.js';
+import { checkAuth, hasAppPasswordAccess, simpleAuthResponse } from './middleware/auth.js';
 import { AppError, createSuccessResponse, createBadRequestResponse, createErrorResponse } from './utils/errors.js';
 import { verifyTurnstileToken } from './utils/common.js';
 import { getCorsAllowedOrigins, createOptionsResponse, applyCors } from './utils/cors.js';
@@ -173,7 +173,8 @@ export default {
       
       // 全局 Turnstile 验证：仅 turnstile_enabled 开启时拦截所有 API 请求
       // turnstile_login_enabled 仅在登录时验证，不在此处拦截
-      if (turnstileEnabled) {
+      // 携带正确 App 访问口令的第三方客户端放行；登录处的 Turnstile 校验同样可由 App 口令绕过。
+      if (turnstileEnabled && !hasAppPasswordAccess(request, sys)) {
         const hasValidCookie = await isTurnstileVerified(request, env, sys);
         
         if (!hasValidCookie) {
