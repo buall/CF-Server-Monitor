@@ -179,19 +179,88 @@ test('embedded theme fonts use the scoped asset path without rewriting data or e
   assert.ok(result.includes('url("data:image/svg+xml,a")'));
 });
 
-test('Access validates signature, issuer, audience, expiry and service identity', async () => {
+test('Access validates service identity and JWT security claims', async t => {
   const { privateKey, publicKey } = await generateKeyPair('RS256');
   const jwk = await exportJWK(publicKey);
   const keys = createLocalJWKSet({ keys: [{ ...jwk, kid: 'test', alg: 'RS256' }] });
-  const token = async (claims = {}, options = {}) => new SignJWT({ sub: '', common_name: 'shellatlas.access', ...claims })
-    .setProtectedHeader({ alg: 'RS256', kid: 'test' }).setIssuedAt().setIssuer(options.issuer || env.SHELLATLAS_ACCESS_TEAM_DOMAIN)
-    .setAudience(options.audience || env.SHELLATLAS_ACCESS_AUD).setExpirationTime(options.expiry || '5m').sign(privateKey);
+  const now = Math.floor(Date.now() / 1000);
+  // Match the service JWT observed in production: type=app, no sub or email.
+  // Undefined overrides are omitted by JSON serialization when signing.
+  const token = async (claims = {}, options = {}) => new SignJWT({
+    type: 'app', common_name: 'shellatlas.access', iss: env.SHELLATLAS_ACCESS_TEAM_DOMAIN,
+    aud: env.SHELLATLAS_ACCESS_AUD, iat: now, exp: now + 300, ...claims
+  }).setProtectedHeader({ alg: options.algorithm || 'RS256', kid: 'test' }).sign(options.key || privateKey);
   const request = jwt => new Request('https://monitor.example/integrations/shellatlas/health', { headers: { 'Cf-Access-Jwt-Assertion': jwt } });
-  assert.equal((await requireShellAtlasAccess(request(await token()), env, keys)).common_name, 'shellatlas.access');
-  for (const jwt of [await token({ common_name: 'other.access' }), await token({ common_name: undefined, email: 'admin@example.com' }), await token({}, { audience: 'other' }), await token({}, { issuer: 'https://other.cloudflareaccess.com' }), await token({}, { expiry: 1 })]) {
-    await assert.rejects(requireShellAtlasAccess(request(jwt), env, keys));
+  const identityError = { status: 403, message: 'This Access identity is not the ShellAtlas service' };
+  const assertionError = { status: 401, message: 'Invalid or expired Cloudflare Access assertion' };
+
+  for (const clientId of [env.SHELLATLAS_ACCESS_CLIENT_ID, undefined]) {
+    const runtime = { ...env, SHELLATLAS_ACCESS_CLIENT_ID: clientId };
+    const mode = clientId ? 'with a pinned Client ID' : 'without a pinned Client ID';
+    for (const sub of [undefined, '']) {
+      await t.test(`accepts ${sub === undefined ? 'missing' : 'empty'} sub ${mode}`, async () => {
+        const payload = await requireShellAtlasAccess(request(await token({ sub })), runtime, keys);
+        assert.equal(payload.common_name, env.SHELLATLAS_ACCESS_CLIENT_ID);
+        assert.equal(payload.sub, sub);
+        assert.equal(Object.hasOwn(payload, 'sub'), sub !== undefined);
+      });
+    }
+    for (const sub of ['human-subject', ' ', null, 0, false, 1, true, [], {}]) {
+      await t.test(`rejects sub=${JSON.stringify(sub)} ${mode}`, async () => {
+        await assert.rejects(requireShellAtlasAccess(request(await token({ sub })), runtime, keys), identityError);
+      });
+    }
+    for (const claims of [
+      { sub: 'human-subject', email: 'admin@example.com', common_name: undefined },
+      { sub: 'human-subject', email: 'admin@example.com' },
+      { email: 'admin@example.com', common_name: undefined }
+    ]) {
+      await t.test(`rejects human identity ${JSON.stringify(claims)} ${mode}`, async () => {
+        await assert.rejects(requireShellAtlasAccess(request(await token(claims)), runtime, keys), identityError);
+      });
+    }
+    for (const common_name of [undefined, '', 'shellatlas', 'shellatlas.access.evil', null, 0, false, [], {}]) {
+      await t.test(`rejects common_name=${JSON.stringify(common_name)} ${mode}`, async () => {
+        await assert.rejects(requireShellAtlasAccess(request(await token({ common_name })), runtime, keys), identityError);
+      });
+    }
   }
-  await assert.rejects(requireShellAtlasAccess(request((await token()).slice(0, -8) + 'invalid'), env, keys));
+
+  await t.test('requires an exact common_name match when Client ID is configured', async () => {
+    const jwt = await token({ common_name: 'other.access' });
+    await assert.rejects(requireShellAtlasAccess(request(jwt), env, keys), identityError);
+    const payload = await requireShellAtlasAccess(request(jwt), { ...env, SHELLATLAS_ACCESS_CLIENT_ID: undefined }, keys);
+    assert.equal(payload.common_name, 'other.access');
+  });
+  for (const [name, claims] of [
+    ['wrong issuer', { iss: 'https://other.cloudflareaccess.com' }],
+    ['missing issuer', { iss: undefined }],
+    ['wrong audience', { aud: 'other' }],
+    ['missing audience', { aud: undefined }],
+    ['expired token', { exp: now - 60 }],
+    ['missing expiry', { exp: undefined }],
+    ['invalid expiry', { exp: 'tomorrow' }],
+    ['missing issued-at', { iat: undefined }],
+    ['invalid issued-at', { iat: 'yesterday' }],
+    ['future not-before', { nbf: now + 300 }]
+  ]) {
+    await t.test(`rejects ${name} even with a valid service identity`, async () => {
+      await assert.rejects(requireShellAtlasAccess(request(await token(claims)), env, keys), assertionError);
+    });
+  }
+  await t.test('rejects a signature from an untrusted key', async () => {
+    const untrusted = await generateKeyPair('RS256');
+    await assert.rejects(requireShellAtlasAccess(request(await token({}, { key: untrusted.privateKey })), env, keys), assertionError);
+  });
+  await t.test('rejects a non-RS256 algorithm even when its signing key is trusted', async () => {
+    const alternate = await generateKeyPair('ES256');
+    const alternateKeys = createLocalJWKSet({ keys: [{ ...await exportJWK(alternate.publicKey), kid: 'test', alg: 'ES256' }] });
+    const jwt = await token({}, { algorithm: 'ES256', key: alternate.privateKey });
+    await assert.rejects(requireShellAtlasAccess(request(jwt), env, alternateKeys), assertionError);
+  });
+});
+
+test('Access requires an assertion and integration errors are never cached', async () => {
   const missing = await handleShellAtlas(new Request('https://monitor.example/integrations/shellatlas/health'), env, {});
   assert.equal(missing.status, 401);
   assert.equal(missing.headers.get('Cache-Control'), 'private, no-store');
@@ -265,13 +334,28 @@ test('authenticated integration provisions idempotently and returns only one D1 
       if (url.includes('raw.githubusercontent.com/missing/')) return new Response('not found', { status: 404 });
       throw new Error(`Unexpected outbound request: ${url}`);
     };
-    const jwt = await new SignJWT({sub:'',common_name:'shellatlas.access'}).setProtectedHeader({alg:'RS256',kid:'integration'})
+    const serviceToken = claims => new SignJWT({type:'app',common_name:'shellatlas.access',...claims}).setProtectedHeader({alg:'RS256',kid:'integration'})
       .setIssuedAt().setIssuer(env.SHELLATLAS_ACCESS_TEAM_DOMAIN).setAudience(env.SHELLATLAS_ACCESS_AUD).setExpirationTime('5m').sign(privateKey);
+    const jwt = await serviceToken();
     const runtime = {...env, DB: db, API_SECRET: 'agent-only-secret'};
     const call = (path, method='GET', body, extra={}) => handleShellAtlas(new Request(`https://monitor.example/integrations/shellatlas/${path}`, {
       method, headers: {'Cf-Access-Jwt-Assertion':jwt,...extra}, ...(body ? {body:JSON.stringify(body)} : {})
     }), runtime, {});
-    assert.equal((await call('health')).status,200);
+    for (const assertion of [jwt, await serviceToken({sub:''})]) {
+      const health = await call('health', 'GET', null, {'Cf-Access-Jwt-Assertion':assertion});
+      assert.equal(health.status, 200);
+      assert.equal(health.headers.get('Content-Type'), 'application/json');
+      assert.equal(health.headers.get('Cache-Control'), 'private, no-store');
+      const data = await health.json();
+      assert.equal(data.ok, true);
+      assert.equal(data.integration, 'shellatlas');
+    }
+    for (const claims of [{sub:'human-subject',email:'admin@example.com'}, {sub:null}, {sub:0}, {sub:false}, {common_name:'other.access'}]) {
+      const denied = await call('health', 'GET', null, {'Cf-Access-Jwt-Assertion':await serviceToken(claims)});
+      assert.equal(denied.status, 403);
+      assert.equal(denied.headers.get('Cache-Control'), 'private, no-store');
+      assert.deepEqual(await denied.json(), {error:'This Access identity is not the ShellAtlas service'});
+    }
     for (const node of [a,a,b]) assert.equal((await call(`nodes/${node}`,'PUT',{name:node===a?'allowed':'other-node-private-name'})).status,200);
     assert.equal((await db.prepare('SELECT COUNT(*) AS count FROM servers').first()).count,2);
     await db.prepare('UPDATE servers SET note = ?, is_hidden = ? WHERE id = ?').bind('private-note','1',a).run();

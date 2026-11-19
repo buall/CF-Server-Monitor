@@ -42,7 +42,10 @@ export async function requireShellAtlasAccess(request, env, keySet = null) {
     const { payload } = await jwtVerify(assertion, keySet, {
       issuer: issuer.origin, audience, algorithms: ['RS256'], requiredClaims: ['exp', 'iat']
     });
-    if (payload.sub !== '' || typeof payload.common_name !== 'string' || !payload.common_name.endsWith('.access') ||
+    // Cloudflare service JWTs may omit sub or set it to an empty string.
+    // Keep all other values (including falsy non-strings) out of this service path.
+    if ((payload.sub !== undefined && payload.sub !== '') ||
+        typeof payload.common_name !== 'string' || !payload.common_name.endsWith('.access') ||
         (clientId && payload.common_name !== clientId)) {
       throw new IntegrationError('This Access identity is not the ShellAtlas service', 403);
     }
